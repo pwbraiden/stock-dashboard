@@ -34,17 +34,24 @@
       <div class="chart-box chart-main"><canvas id="cmpChart"></canvas></div>
       <p class="muted small" id="cmpNote"></p>
       <div class="whatif">
-        <div class="wi-head"><h3>What if…</h3>
-          <div class="seg" id="wiMode"><button type="button" data-mode="beta">QQQ target × beta</button><button type="button" data-mode="recovery">Drawdown recovery</button><button type="button" data-mode="targets">Price targets</button></div>
-        </div>
+        <h3>QQQ target</h3>
         <div class="wi-row">
-          <label data-for="qqqsrc">QQQ<select id="wiQqq"></select></label>
+          <label>Based on<select id="wiQqq">
+            <option value="price">My QQQ price</option>
+            <option value="rule">Drawdown recovery rule</option>
+            <optgroup label="Bank year-end S&amp;P 500 targets" id="wiBanks"></optgroup>
+          </select></label>
           <label data-for="price">QQQ price <span class="muted" id="wiNow"></span><input id="wiPrice" type="number" step="any" min="0" placeholder="e.g. 720"></label>
-          <label data-for="recovery">Take back % of drop<input id="wiRec" type="number" step="any" min="0" max="100" placeholder="30"></label>
-          <label data-for="recovery">From high since<input id="wiPeak" type="date"></label>
           <label>By date<input id="wiDate" type="date"></label>
           <label>Time<input id="wiTime" type="time"></label>
           <button class="ghost" id="wiClear" type="button">Clear</button>
+        </div>
+        <div class="wi-head wi-sub"><h3>Her stocks: method</h3>
+          <div class="seg" id="wiMode"><button type="button" data-mode="beta">Beta to QQQ target</button><button type="button" data-mode="recovery">Drawdown recovery</button><button type="button" data-mode="targets">Price targets</button></div>
+        </div>
+        <div class="wi-row" data-for="recovery">
+          <label>Take back % of drop<input id="wiRec" type="number" step="any" min="0" max="100" placeholder="30"></label>
+          <label>From high since<input id="wiPeak" type="date"></label>
         </div>
         <div id="wiOut" class="wi-out"></div>
         <div class="table-wrap"><table id="wiTable" class="holdings hidden">
