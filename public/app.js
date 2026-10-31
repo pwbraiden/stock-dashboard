@@ -551,11 +551,11 @@ function whatIfTargets(d, rows, total) {
   const B = state.base, name = esc(state.names.gf);
   $("#wiOut").innerHTML = (qLine ? qLine + "<br>" : "") +
     (rows.length ? `${name}'s portfolio → implied <b class="${cls(pm)}">${pct(pm * 100)}</b> = ${signed(total * pm, B)}, value <b>${money(total * (1 + pm), B)}</b>, return since start <b class="${cls(gfRet)}">${pct(gfRet)}</b>` : `${name} has no stocks yet.`);
-  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Price now</th><th class="num">Analyst consensus</th><th>Use</th><th class="num">Target</th><th class="num">Implied move</th></tr>`;
+  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Price now</th><th class="num">Consensus</th><th>Use</th><th class="num">Target</th><th class="num">Move</th></tr>`;
   if (!$("#wiTable").contains(document.activeElement)) {
     $("#wiTable tbody").innerHTML = info.map(({ r, a, mine, t, tp, mv }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
       <td class="num">${money(r.price, r.cur)}</td>
-      <td class="num">${a ? `${money(a.mean, r.cur)}<div class="small muted">${a.n} analysts · ${money(a.low, r.cur)}–${money(a.high, r.cur)}</div>` : '<span class="muted">none</span>'}</td>
+      <td class="num">${a ? `<span title="Range ${money(a.low, r.cur)}–${money(a.high, r.cur)}">${money(a.mean, r.cur)}</span><div class="small muted">${a.n} analysts</div>` : '<span class="muted">none</span>'}</td>
       <td><select data-src="${esc(r.symbol)}"><option value="consensus"${mine ? "" : " selected"}>Consensus</option><option value="mine"${mine ? " selected" : ""}>My target</option></select></td>
       <td class="num">${mine ? `<input class="tgt" type="number" step="any" min="0" data-tgt="${esc(r.symbol)}" value="${t.price ?? ""}">` : `<b>${money(tp, r.cur)}</b>`}</td>
       <td class="num ${cls(mv)}">${mv != null ? pct(mv * 100) : "–"}</td></tr>`).join("");
