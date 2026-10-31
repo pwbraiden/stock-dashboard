@@ -5,7 +5,7 @@ const OWNERS = ["me", "gf"];
 const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b" };
 const BENCH = "QQQ";
 const state = {
-  lots: [], quotes: {}, fx: {}, rows: {},
+  lots: [], quotes: {}, fx: {}, rows: {}, about: {},
   base: localStorage.getItem("base") || "EUR",
   sort: { k: "valueBase", dir: -1 },
   selected: null, editId: null,
@@ -57,7 +57,10 @@ function cleanLot(b) {
 
 async function loadQuotes() {
   const syms = [...new Set(state.lots.map((l) => l.symbol))];
+  const need = syms.filter((x) => !(x in state.about));
+  const aboutP = need.length ? api("/api/about?symbols=" + encodeURIComponent(need.join(","))).then((a) => Object.assign(state.about, a)).catch(() => {}) : null;
   state.quotes = syms.length ? await api("/api/quotes?symbols=" + encodeURIComponent(syms.join(","))) : {};
+  await aboutP;
   const curs = [...new Set(Object.values(state.quotes).map((q) => q.currency).filter((c) => c && c !== state.base))];
   const fxSyms = curs.map((c) => `${c}${state.base}=X`);
   const fxq = fxSyms.length ? await api("/api/quotes?symbols=" + encodeURIComponent(fxSyms.join(","))) : {};
@@ -118,7 +121,7 @@ function renderOwner(o) {
   for (const r of rows) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${r.error ? '<span class="down">Price unavailable</span>' : esc(r.name)}</div></td>
+      <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${r.error ? '<span class="down">Price unavailable</span>' : esc(r.name)}</div>${state.about[r.symbol] ? `<div class="about">${esc(state.about[r.symbol])}</div>` : ""}</td>
       <td class="num">${num(r.shares)}</td>
       <td class="num">${money(r.avg, r.cur)}</td>
       <td class="num"><b>${money(r.price, r.cur)}</b><div class="small ${cls(r.dayPct)}">${pct(r.dayPct)}</div></td>
@@ -670,7 +673,7 @@ async function loadSuggest() {
         <div class="${up(fs[i - 1]?.rev, f.rev)}">${big(f.rev)}</div>
         <div class="small ${up(fs[i - 1]?.eps, f.eps) || "muted"}">${eps(f.eps)}</div></td>`).join("");
       return `<tr>
-      <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${esc(r.name)}</div></td>
+      <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${esc(r.name)}</div>${r.about ? `<div class="about">${esc(r.about)}</div>` : ""}</td>
       <td class="num"><span class="pill ${cls(r.upside)}">${pct(r.upside)}</span></td>
       <td class="num ${cls(r.offHigh)}">${pct(r.offHigh)}</td>
       <td class="num ${cls(r.week)}">${pct(r.week)}</td>${prices}${tgts}${fwd}</tr>`;

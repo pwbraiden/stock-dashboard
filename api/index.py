@@ -293,6 +293,177 @@ def fundamentals(symbol, splits):
     return out
 
 
+ABOUT = {
+    'NVDA': 'Graphics chips that power most AI training and gaming',
+    'AMD': "Computer, gaming and AI chips; Nvidia and Intel's main rival",
+    'AVGO': 'Networking and custom AI chips, plus VMware software',
+    'TSM': 'Makes the chips designed by Apple, Nvidia and others',
+    'MU': 'Memory chips for computers, phones and AI servers',
+    'MRVL': 'Custom AI and data-centre networking chips',
+    'ANET': 'High-speed network switches for cloud and AI data centres',
+    'VRT': 'Power and cooling equipment for data centres',
+    'DELL': 'PCs, servers and AI server systems',
+    'PLTR': 'Data-analysis and AI software for governments and companies',
+    'QCOM': 'Chips that run most Android phones, plus car and PC chips',
+    'INTC': 'PC and server processors; also building chip factories',
+    'CRWV': 'Rents out Nvidia GPU cloud computing for AI',
+    'ORCL': 'Database software and a fast-growing AI cloud business',
+    'MSFT': 'Windows, Office, Azure cloud and a big stake in OpenAI',
+    'GOOGL': 'Google search, YouTube, Android and Google Cloud',
+    'META': 'Facebook, Instagram and WhatsApp, funded by ads',
+    'AMZN': 'Online shopping plus AWS, the biggest cloud provider',
+    'LRCX': 'Machines that etch and deposit layers on chips',
+    'AMAT': 'The largest maker of chip-manufacturing equipment',
+    'KLAC': 'Machines that inspect chips for defects during production',
+    'CEG': 'Largest US nuclear power producer, selling power to data centres',
+    'VST': 'Power plants (gas and nuclear) selling electricity to the grid',
+    'COHR': 'Lasers and optical parts for data-centre networks',
+    'CLS': 'Builds servers and network gear for big tech companies',
+    'SMCI': 'Builds AI servers packed with Nvidia chips',
+    'NBIS': 'AI cloud computing provider (spun out of Yandex)',
+    'ALAB': 'Connectivity chips that link AI processors in data centres',
+    'ARM': 'Designs the chip blueprints used in nearly all smartphones',
+    'ASML': 'Sole maker of the machines needed to print the most advanced chips',
+    'CRM': 'Salesforce: software for managing sales and customers',
+    'NOW': 'Software that automates company IT and workflows',
+    'ADBE': 'Photoshop, Acrobat and other creative software',
+    'INTU': 'TurboTax, QuickBooks and Credit Karma',
+    'WDAY': 'HR and finance software for large companies',
+    'SNOW': 'Cloud data warehouse for storing and analysing company data',
+    'DDOG': 'Monitors apps and cloud servers for problems',
+    'CRWD': 'Cybersecurity that protects company computers',
+    'PANW': 'Cybersecurity firewalls and software',
+    'ZS': 'Cloud cybersecurity for secure internet access',
+    'NET': 'Cloudflare: speeds up and protects websites',
+    'MDB': 'Database software used by app developers',
+    'TEAM': 'Jira and Confluence: teamwork software',
+    'HUBS': 'Marketing and sales software for small businesses',
+    'SHOP': 'Lets businesses build online shops',
+    'FTNT': 'Network security hardware and software',
+    'ADSK': 'AutoCAD design software for architects and engineers',
+    'TTD': 'Platform that buys online ads for advertisers',
+    'APP': 'Ad tech that helps apps and games find users',
+    'U': 'Unity: engine used to build video games',
+    'OKTA': 'Login and identity security for companies',
+    'DOCU': 'Electronic signatures and contract software',
+    'GTLB': 'Software for developers to build and ship code',
+    'IOT': 'Samsara: sensors and software for fleets and factories',
+    'S': 'SentinelOne: AI-based cybersecurity',
+    'CDNS': 'Software used to design chips',
+    'SNPS': 'Software used to design chips',
+    'JPM': 'Largest US bank',
+    'BAC': 'Bank of America: major US consumer and investment bank',
+    'WFC': 'Wells Fargo: large US consumer bank',
+    'C': 'Citigroup: global bank',
+    'GS': 'Goldman Sachs: investment bank and trading',
+    'MS': 'Morgan Stanley: investment bank and wealth management',
+    'SCHW': 'Charles Schwab: stock broker and wealth manager',
+    'BLK': "BlackRock: world's largest fund manager (iShares ETFs)",
+    'AXP': 'American Express credit cards',
+    'V': 'Visa card payment network',
+    'MA': 'Mastercard payment network',
+    'COF': 'Capital One: credit cards and consumer bank',
+    'PYPL': 'PayPal and Venmo online payments',
+    'HOOD': 'Robinhood: app for trading stocks and crypto',
+    'SOFI': 'Online bank for loans and investing',
+    'KKR': 'Private equity and investment firm',
+    'BX': "Blackstone: world's largest alternative investment firm",
+    'APO': 'Apollo: private credit and investment firm, plus insurance',
+    'SPGI': 'S&P Global: credit ratings and stock indexes',
+    'MCO': "Moody's: credit ratings and financial data",
+    'ICE': 'Owns the New York Stock Exchange and mortgage tech',
+    'CME': "Runs the world's biggest futures exchange",
+    'PNC': 'Large US regional bank',
+    'USB': 'U.S. Bancorp: large US regional bank',
+    'TFC': 'Truist: US regional bank in the Southeast',
+    'ARES': 'Private credit and investment firm',
+    'COIN': 'Coinbase: largest US crypto exchange',
+    'AFRM': 'Affirm: buy now, pay later loans',
+    'NU': 'Nubank: digital bank in Brazil and Latin America',
+    'GE': 'GE Aerospace: jet engines for airlines and military',
+    'CAT': 'Caterpillar: construction and mining machinery',
+    'HON': 'Honeywell: aerospace, automation and building tech',
+    'RTX': 'Raytheon: jet engines, missiles and defence systems',
+    'LMT': 'Lockheed Martin: fighter jets (F-35) and missiles',
+    'BA': 'Boeing: passenger planes and defence aircraft',
+    'UNP': 'Union Pacific: freight railroad in the western US',
+    'UPS': 'Package delivery',
+    'ETN': 'Eaton: electrical equipment for buildings and data centres',
+    'NOC': 'Northrop Grumman: stealth bombers, space and defence',
+    'WM': 'Waste Management: rubbish collection and landfills',
+    'URI': 'United Rentals: rents out construction equipment',
+    'PWR': 'Quanta: builds power lines and grid infrastructure',
+    'CARR': 'Carrier: heating and air conditioning',
+    'JCI': 'Johnson Controls: building heating, cooling and security',
+    'FDX': 'FedEx: package delivery',
+    'CSX': 'Freight railroad in the eastern US',
+    'NSC': 'Norfolk Southern: freight railroad in the eastern US',
+    'GEV': 'GE Vernova: gas turbines, wind and grid equipment',
+    'TDG': 'TransDigm: specialist aircraft parts',
+    'CMI': 'Cummins: engines and power generators',
+    'HWM': 'Howmet: engine parts and fasteners for aircraft',
+    'ODFL': 'Old Dominion: trucking for shared loads',
+    'XYL': 'Xylem: water pumps and treatment',
+    'JBHT': 'J.B. Hunt: trucking and rail freight',
+    'CHRW': 'C.H. Robinson: arranges freight shipping for companies',
+    'SAIA': 'Trucking for shared loads',
+    'AAL': 'American Airlines',
+    'KTOS': 'Kratos: military drones and defence tech',
+    'AVAV': 'AeroVironment: small military drones',
+    'BLDR': 'Builders FirstSource: building materials for homebuilders',
+    'DAL': 'Delta Air Lines',
+    'UAL': 'United Airlines',
+    'BWXT': 'Nuclear reactors for navy submarines and power',
+    'MAS': 'Masco: taps, paint and home-improvement products',
+    'LLY': 'Eli Lilly: weight-loss (Zepbound) and diabetes drugs',
+    'UNH': 'UnitedHealth: largest US health insurer',
+    'JNJ': 'Johnson & Johnson: medicines and medical devices',
+    'ABBV': 'AbbVie: immunology drugs (Skyrizi, Rinvoq) and Botox',
+    'MRK': 'Merck: cancer drug Keytruda and vaccines',
+    'PFE': 'Pfizer: medicines and vaccines',
+    'TMO': 'Thermo Fisher: lab equipment and supplies',
+    'ABT': 'Abbott: medical devices, diagnostics and nutrition',
+    'DHR': 'Danaher: lab and diagnostics equipment',
+    'ISRG': 'Intuitive Surgical: da Vinci surgical robots',
+    'AMGN': 'Amgen: biotech medicines',
+    'GILD': 'Gilead: HIV and liver disease drugs',
+    'VRTX': 'Vertex: cystic fibrosis and pain drugs',
+    'REGN': 'Regeneron: eye and allergy drugs (Eylea, Dupixent)',
+    'BMY': 'Bristol Myers Squibb: cancer and heart drugs',
+    'MDT': 'Medtronic: medical devices like pacemakers',
+    'SYK': 'Stryker: hip/knee implants and surgical equipment',
+    'BSX': 'Boston Scientific: heart and other medical devices',
+    'CVS': 'CVS: pharmacies and Aetna health insurance',
+    'CI': 'Cigna: health insurance and pharmacy benefits',
+    'ELV': 'Elevance: health insurer (Anthem)',
+    'HCA': 'HCA: largest US hospital operator',
+    'ZTS': 'Zoetis: medicines and vaccines for pets and livestock',
+    'MRNA': 'Moderna: mRNA vaccines',
+    'BIIB': "Biogen: Alzheimer's and MS drugs",
+    'DXCM': 'Dexcom: glucose monitors for diabetics',
+    'IDXX': 'IDEXX: diagnostic tests for vets',
+    'HUM': 'Humana: Medicare health insurer',
+    'NVO': 'Novo Nordisk: Ozempic and Wegovy',
+    'AZN': 'AstraZeneca: cancer and other medicines',
+    'ACM': 'AECOM: designs and manages infrastructure projects',
+    'AAPL': 'iPhone, Mac and services',
+    'SAP.DE': 'Business software for finance and supply chains',
+    'TSLA': 'Tesla: electric cars, batteries and robotaxis',
+    'NFLX': 'Netflix streaming',
+}
+
+
+def about(symbol):
+    """One plain-English line on what the company does; falls back to Yahoo's industry."""
+    if symbol in ABOUT:
+        return ABOUT[symbol]
+    key = "about:" + symbol
+    if key not in _cache:
+        a = (qsummary(symbol, "assetProfile") or {}).get("assetProfile") or {}
+        _cache[key] = (time.time(), " · ".join(x for x in (a.get("industry"), a.get("sector")) if x))
+    return _cache[key][1]
+
+
 def suggest(bucket):
     key = "suggest:" + bucket
     hit = _cache.get(key)
@@ -306,6 +477,7 @@ def suggest(bucket):
     with ThreadPoolExecutor(5) as ex:
         for r, f in zip(top, ex.map(lambda r: _safe(fundamentals, r["symbol"], r["_splits"]), top)):
             r["fund"] = f
+            r["about"] = _safe(about, r["symbol"])
     for r in rows:
         r.pop("_splits", None)
     out = {"bucket": bucket, "since": TARGETS_SINCE, "years": HIST_YEARS, "min": MIN_TARGETS, "checked": len(syms), "qualified": len(rows), "top": top}
@@ -335,6 +507,10 @@ def route(path):
             syms = [s for s in qs.get("symbols", [""])[0].split(",") if s][:30]
             with ThreadPoolExecutor(8) as ex:
                 return 200, dict(zip(syms, ex.map(targets, syms)))
+        if u.path == "/api/about":
+            syms = [x for x in qs.get("symbols", [""])[0].upper().split(",") if x][:60]
+            with ThreadPoolExecutor(8) as ex:
+                return 200, dict(zip(syms, ex.map(lambda x: _safe(about, x) or "", syms)))
         if u.path == "/api/suggest":
             b = qs.get("bucket", ["ai"])[0]
             return (200, suggest(b)) if b in BUCKETS else (400, {"error": "unknown bucket"})
