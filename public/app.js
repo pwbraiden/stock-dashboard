@@ -408,13 +408,14 @@ function drawCompare() {
 }
 
 // ---- What-if: QQQ target -> implied move for girlfriend's portfolio via beta ----
+const BETA_START = "2023-01-01";
 const betas = {};
 const betaOverride = JSON.parse(localStorage.getItem("betaOverride") || "{}");
 const wiState = JSON.parse(localStorage.getItem("whatIf") || "{}");
 async function loadBetas(syms) {
   const need = syms.filter((s) => !(s in betas));
   if (!need.length) return;
-  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&range=1y`).catch(() => null);
+  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${BETA_START}`).catch(() => null);
   const [q, ...hs] = await Promise.all([BENCH, ...need].map(get));
   const rets = (pts) => { const m = {}; for (let i = 1; i < pts.length; i++) m[localDay(pts[i][0])] = pts[i][1] / pts[i - 1][1] - 1; return m; };
   const qr = q ? rets(q.points) : {};
@@ -451,12 +452,12 @@ function whatIf(d) {
   if (!editing) {
     tb.innerHTML = rows.map((r) => { const b = betaOf(r.symbol), sm = b != null ? b * m : null;
       return `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
-        <td class="num"><input type="number" step="0.01" data-beta="${esc(r.symbol)}" value="${b != null ? b.toFixed(2) : ""}" title="${betaOverride[r.symbol] != null ? "Your value" : "Measured from the last year of daily prices"}">${betaOverride[r.symbol] != null ? ' <button class="icon" data-reset="' + esc(r.symbol) + '" title="Use measured beta">↺</button>' : ""}</td>
+        <td class="num"><input type="number" step="0.01" data-beta="${esc(r.symbol)}" value="${b != null ? b.toFixed(2) : ""}" title="${betaOverride[r.symbol] != null ? "Your value" : "Measured from daily prices since 1 Jan 2023"}">${betaOverride[r.symbol] != null ? ' <button class="icon" data-reset="' + esc(r.symbol) + '" title="Use measured beta">↺</button>' : ""}</td>
         <td class="num ${cls(sm)}">${sm != null ? pct(sm * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
         <td class="num"><b>${sm != null && r.price != null ? money(r.price * (1 + sm), r.cur) : "–"}</b></td></tr>`; }).join("");
   }
   $("#wiTable").classList.toggle("hidden", !rows.length);
-  $("#wiNote").textContent = `Beta = how much a stock has moved for each 1% move in ${BENCH}, measured from the last year of daily prices. You can type your own.` +
+  $("#wiNote").textContent = `Beta = how much a stock has moved for each 1% move in ${BENCH}, measured from daily prices since 1 Jan 2023 (or since listing, if later). You can type your own.` +
     (missing.length ? ` No beta for ${missing.join(", ")}, so it's left out.` : "");
   return { benchRet: (target / d.b0 - 1) * 100, gfRet, when: wiState.date ? `${wiState.date}T${wiState.time || "22:00"}` : null };
 }
