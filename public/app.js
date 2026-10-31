@@ -1,4 +1,5 @@
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
 const START = "2026-10-27";
 const OWNERS = ["me", "gf"];
 const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b" };
@@ -353,7 +354,7 @@ async function renderCompare() {
   const sd = new Date(start.when);
   $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
     (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
-  await loadBetas([...new Set(state.lots.filter((l) => ownerOf(l) === "gf").map((l) => l.symbol))]);
+  await Promise.all([loadBetas(gfSyms()), wiState.mode === "recovery" ? loadPeaks([BENCH, ...gfSyms()], recFrom()) : null]);
   if (seq !== cmp.seq) return;
   cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
   drawCompare();
@@ -390,7 +391,7 @@ function drawCompare() {
       datasets.push({ label, data, borderColor: color, backgroundColor: color, borderDash: [6, 4], borderWidth: 2, spanGaps: true, tension: 0,
         pointRadius: data.map((_, j) => (j === n ? 5 : 0)), proj: true });
     };
-    proj("bench", `${BENCH} target`, COLORS.bench, wi.benchRet);
+    if (wi.benchRet != null) proj("bench", wi.benchLabel || `${BENCH} target`, COLORS.bench, wi.benchRet);
     if (wi.gfRet != null && !state.hidden.gf) proj("gf", `${state.names.gf} implied`, COLORS.gf, wi.gfRet);
   }
   charts.cmp?.destroy();
@@ -432,16 +433,66 @@ async function loadBetas(syms) {
 const betaOf = (s) => betaOverride[s] ?? betas[s] ?? null;
 
 function whatIf(d) {
+  const mode = wiState.mode === "recovery" ? "recovery" : "beta";
+  $$("#wiMode button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $$(".wi-row [data-for]").forEach((el) => el.classList.toggle("hidden", el.dataset.for !== mode));
+  const rows = (state.rows.gf || []).filter((r) => r.valueBase != null);
+  const total = rows.reduce((a, r) => a + r.valueBase, 0);
+  const res = mode === "recovery" ? whatIfRecovery(d, rows, total) : whatIfBeta(d, rows, total);
+  if (!res) { $("#wiOut").innerHTML = ""; $("#wiNote").textContent = ""; $("#wiTable").classList.add("hidden"); }
+  return res;
+}
+
+// Drawdown recovery: each stock takes back X% of its drop from its high since a date.
+const PEAK_START = "2026-10-01";
+const peaks = {};
+const recFrom = () => wiState.peakFrom || PEAK_START;
+const recPct = () => (wiState.rec === undefined || wiState.rec === "" ? 30 : +wiState.rec);
+async function loadPeaks(syms, from) {
+  const need = syms.filter((s) => !(`${s}|${from}` in peaks));
+  if (!need.length) return;
+  const hs = await Promise.all(need.map((s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${from}`).catch(() => null)));
+  need.forEach((s, i) => {
+    const ps = (hs[i]?.points || []).filter((p) => localDay(p[0]) >= from && p[1] != null).map((p) => p[1]);
+    peaks[`${s}|${from}`] = ps.length ? Math.max(...ps) : null;
+  });
+}
+const gfSyms = () => [...new Set(state.lots.filter((l) => ownerOf(l) === "gf").map((l) => l.symbol))];
+
+function whatIfRecovery(d, rows, total) {
+  const from = recFrom(), k = recPct() / 100;
+  if (!(k >= 0) || !d.bLast) return null;
+  const imp = (now, peak) => (peak == null || now == null ? null : now + k * (Math.max(peak, now) - now));
+  let pm = 0, missing = [];
+  const info = rows.map((r) => {
+    const peak = peaks[`${r.symbol}|${from}`], ip = imp(r.price, peak), mv = ip != null ? ip / r.price - 1 : null;
+    if (mv == null) missing.push(r.symbol); else pm += (r.valueBase / total) * mv;
+    return { r, peak, ip, mv, dd: peak ? r.price / Math.max(peak, r.price) - 1 : null };
+  });
+  const qPeak = peaks[`${BENCH}|${from}`], qImp = imp(d.bLast, qPeak);
+  const gfLast = [...d.gf].reverse().find((x) => x != null);
+  const gfRet = gfLast != null && rows.length ? ((1 + gfLast / 100) * (1 + pm) - 1) * 100 : null;
+  const B = state.base, name = esc(state.names.gf);
+  const fromLbl = new Date(from + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  $("#wiOut").innerHTML = `Each stock takes back <b>${recPct()}%</b> of its drop from its high since ${esc(fromLbl)}.` +
+    (qImp != null ? `<br>${BENCH} high ${money(qPeak, "USD")}, now ${money(d.bLast, "USD")} → <b>${money(qImp, "USD")}</b> = <b class="${cls(qImp - d.bLast)}">${pct((qImp / d.bLast - 1) * 100)}</b>` : "") +
+    (rows.length ? `<br>${name}'s portfolio → implied <b class="${cls(pm)}">${pct(pm * 100)}</b> = ${signed(total * pm, B)}, value <b>${money(total * (1 + pm), B)}</b>, return since start <b class="${cls(gfRet)}">${pct(gfRet)}</b>` : `<br>${name} has no stocks yet.`);
+  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">High since ${esc(fromLbl)}</th><th class="num">Drawdown</th><th class="num">Price now</th><th class="num">Implied price</th><th class="num">Implied move</th></tr>`;
+  $("#wiTable tbody").innerHTML = info.map(({ r, peak, ip, mv, dd }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+    <td class="num">${money(peak, r.cur)}</td><td class="num ${cls(dd)}">${dd != null ? pct(dd * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
+    <td class="num"><b>${money(ip, r.cur)}</b></td><td class="num ${cls(mv)}">${mv != null ? pct(mv * 100) : "–"}</td></tr>`).join("");
+  $("#wiTable").classList.toggle("hidden", !rows.length);
+  $("#wiNote").textContent = `High = highest price since ${fromLbl}. A stock already at its high stays where it is.` + (missing.length ? ` No price history for ${missing.join(", ")}, so it's left out.` : "");
+  return { benchRet: qImp != null && d.b0 ? (qImp / d.b0 - 1) * 100 : null, benchLabel: `${BENCH} implied`, gfRet, when: wiState.date ? `${wiState.date}T${wiState.time || "22:00"}` : null };
+}
+
+function whatIfBeta(d, rows, total) {
   $("#wiNow").textContent = d.bLast ? `(now ${money(d.bLast, "USD")})` : "";
   const target = +wiState.price;
   const tb = $("#wiTable tbody"), editing = $("#wiTable").contains(document.activeElement);
-  if (!(target > 0) || !d.bLast) {
-    $("#wiOut").innerHTML = ""; $("#wiNote").textContent = ""; $("#wiTable").classList.add("hidden");
-    return null;
-  }
+  if (!(target > 0) || !d.bLast) return null;
   const m = target / d.bLast - 1;
-  const rows = (state.rows.gf || []).filter((r) => r.valueBase != null);
-  const total = rows.reduce((a, r) => a + r.valueBase, 0);
+  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Beta vs QQQ</th><th class="num">Implied move</th><th class="num">Price now</th><th class="num">Implied price</th></tr>`;
   let pm = 0, wb = 0, missing = [];
   for (const r of rows) { const b = betaOf(r.symbol); if (b == null) { missing.push(r.symbol); continue; } pm += (r.valueBase / total) * b * m; wb += (r.valueBase / total) * b; }
   const gfLast = [...d.gf].reverse().find((x) => x != null);
@@ -462,12 +513,17 @@ function whatIf(d) {
   return { benchRet: (target / d.b0 - 1) * 100, gfRet, when: wiState.date ? `${wiState.date}T${wiState.time || "22:00"}` : null };
 }
 
-$("#wiPrice").value = wiState.price || ""; $("#wiDate").value = wiState.date || ""; $("#wiTime").value = wiState.time || "";
-["wiPrice", "wiDate", "wiTime"].forEach((id) => $("#" + id).addEventListener("input", () => {
-  Object.assign(wiState, { price: $("#wiPrice").value, date: $("#wiDate").value, time: $("#wiTime").value });
-  localStorage.setItem("whatIf", JSON.stringify(wiState)); drawCompare();
-}));
-$("#wiClear").onclick = () => { ["wiPrice", "wiDate", "wiTime"].forEach((id) => ($("#" + id).value = "")); for (const k in wiState) delete wiState[k]; localStorage.removeItem("whatIf"); drawCompare(); };
+const WI = { wiPrice: "price", wiDate: "date", wiTime: "time", wiRec: "rec", wiPeak: "peakFrom" };
+const fillWi = () => { for (const id in WI) $("#" + id).value = wiState[WI[id]] ?? ""; $("#wiRec").value = recPct(); $("#wiPeak").value = recFrom(); };
+const saveWi = () => localStorage.setItem("whatIf", JSON.stringify(wiState));
+async function redrawWi() {
+  if (wiState.mode === "recovery") { drawCompare(); await loadPeaks([BENCH, ...gfSyms()], recFrom()); }
+  drawCompare();
+}
+fillWi();
+Object.keys(WI).forEach((id) => $("#" + id).addEventListener("input", () => { wiState[WI[id]] = $("#" + id).value; saveWi(); redrawWi(); }));
+$("#wiMode").addEventListener("click", (e) => { const m = e.target.dataset?.mode; if (!m) return; wiState.mode = m; saveWi(); redrawWi(); });
+$("#wiClear").onclick = () => { const mode = wiState.mode; for (const k in wiState) delete wiState[k]; if (mode) wiState.mode = mode; saveWi(); fillWi(); drawCompare(); };
 $("#wiTable").addEventListener("change", (e) => {
   const s = e.target.dataset.beta; if (!s) return;
   const v = parseFloat(e.target.value);
