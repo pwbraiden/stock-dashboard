@@ -3,6 +3,7 @@ import json
 import time
 import urllib.parse
 import urllib.request
+from http.cookiejar import CookieJar
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler
 
@@ -94,6 +95,52 @@ def search(q):
 
 
 
+_crumb = {"t": 0}
+
+
+def yahoo_auth(force=False):
+    """Cookie + crumb needed by Yahoo's quoteSummary endpoint (cached ~1h)."""
+    if not force and time.time() - _crumb["t"] < 3600:
+        return _crumb["opener"], _crumb["crumb"]
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+    try:
+        opener.open(urllib.request.Request("https://fc.yahoo.com", headers=UA), timeout=10)
+    except Exception:  # noqa: BLE001  (404 still sets the cookie)
+        pass
+    req = urllib.request.Request("https://query2.finance.yahoo.com/v1/test/getcrumb", headers=UA)
+    c = opener.open(req, timeout=10).read().decode()
+    _crumb.update(t=time.time(), opener=opener, crumb=c)
+    return opener, c
+
+
+def targets(symbol):
+    """Analyst price targets (mean/median/high/low) from Yahoo financialData."""
+    key = "targets:" + symbol
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    for attempt in (0, 1):
+        opener, c = yahoo_auth(force=attempt == 1)
+        url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=financialData,price&crumb=%s" % (
+            urllib.parse.quote(symbol), urllib.parse.quote(c))
+        try:
+            with opener.open(urllib.request.Request(url, headers=UA), timeout=10) as r:
+                res = json.load(r)["quoteSummary"]["result"][0]
+            break
+        except Exception:  # noqa: BLE001
+            if attempt:
+                return None
+    fd, pr = res.get("financialData", {}), res.get("price", {})
+    raw = lambda k: (fd.get(k) or {}).get("raw")  # noqa: E731
+    out = None
+    if raw("targetMeanPrice"):
+        out = {"mean": raw("targetMeanPrice"), "median": raw("targetMedianPrice"), "high": raw("targetHighPrice"),
+               "low": raw("targetLowPrice"), "n": raw("numberOfAnalystOpinions"), "rec": fd.get("recommendationKey"),
+               "currency": pr.get("currency")}
+    _cache[key] = (time.time(), out)
+    return out
+
+
 def route(path):
     """Return (status, payload) for an /api/... GET path, or None if not an API route."""
     u = urllib.parse.urlparse(path)
@@ -105,6 +152,10 @@ def route(path):
                 return 200, dict(zip(syms, ex.map(quote, syms)))
         if u.path == "/api/history":
             return 200, history(qs["symbol"][0], qs.get("range", ["1y"])[0], qs.get("start", [None])[0])
+        if u.path == "/api/targets":
+            syms = [s for s in qs.get("symbols", [""])[0].split(",") if s][:30]
+            with ThreadPoolExecutor(8) as ex:
+                return 200, dict(zip(syms, ex.map(targets, syms)))
         if u.path == "/api/search":
             return 200, search(qs.get("q", [""])[0])
     except Exception as e:  # noqa: BLE001

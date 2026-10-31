@@ -35,10 +35,11 @@
       <p class="muted small" id="cmpNote"></p>
       <div class="whatif">
         <div class="wi-head"><h3>What if…</h3>
-          <div class="seg" id="wiMode"><button type="button" data-mode="beta">QQQ target × beta</button><button type="button" data-mode="recovery">Drawdown recovery</button></div>
+          <div class="seg" id="wiMode"><button type="button" data-mode="beta">QQQ target × beta</button><button type="button" data-mode="recovery">Drawdown recovery</button><button type="button" data-mode="targets">Price targets</button></div>
         </div>
         <div class="wi-row">
-          <label data-for="beta">QQQ price <span class="muted" id="wiNow"></span><input id="wiPrice" type="number" step="any" min="0" placeholder="e.g. 720"></label>
+          <label data-for="qqqsrc">QQQ<select id="wiQqq"></select></label>
+          <label data-for="price">QQQ price <span class="muted" id="wiNow"></span><input id="wiPrice" type="number" step="any" min="0" placeholder="e.g. 720"></label>
           <label data-for="recovery">Take back % of drop<input id="wiRec" type="number" step="any" min="0" max="100" placeholder="30"></label>
           <label data-for="recovery">From high since<input id="wiPeak" type="date"></label>
           <label>By date<input id="wiDate" type="date"></label>
