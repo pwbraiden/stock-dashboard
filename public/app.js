@@ -2,8 +2,8 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const START = "2026-10-05";
 const OWNERS = ["me", "gf"];
-const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b" };
-const BENCH = "QQQ";
+const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b", eu: "#a78bfa" };
+const BENCH = "QQQ", GLOBAL = "GEISAC.FGI";
 const state = {
   lots: [], quotes: {}, fx: {}, rows: {}, about: {},
   base: "USD",
@@ -325,7 +325,7 @@ async function renderCompare() {
   const start = chartStart(), startDay = start.when.slice(0, 10);
   const syms = [...new Set(state.lots.map((l) => l.symbol))];
   const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${startDay}`).catch(() => null);
-  const [bench, ...hs] = await Promise.all([BENCH, ...syms].map(get));
+  const [bench, glob, ...hs] = await Promise.all([BENCH, GLOBAL, ...syms].map(get));
   if (seq !== cmp.seq) return;
   if (!bench || !bench.points.length) { $("#cmpNote").textContent = `Couldn't load ${BENCH} prices.`; return; }
   const H = {}; syms.forEach((s, i) => (H[s] = hs[i]?.points || []));
@@ -351,12 +351,14 @@ async function renderCompare() {
     });
   };
   const b0 = bpx.find((p) => p != null);
+  const gp = glob?.points || [], g0 = gp.find((p) => localWhen(p[0]) >= start.when)?.[1];
+  const eu = ffill(gp, keys).map((p) => (p != null && g0 ? (p / g0 - 1) * 100 : null));
   const sd = new Date(start.when);
   $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
     (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : " (market top)");
   await Promise.all([loadBetas(allSyms()), loadWi()]);
   if (seq !== cmp.seq) return;
-  cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
+  cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)), eu };
   drawCompare();
 }
 
@@ -367,6 +369,7 @@ function drawCompare() {
     { key: "me", label: state.names.me, color: COLORS.me },
     { key: "gf", label: state.names.gf, color: COLORS.gf },
     { key: "bench", label: BENCH, color: COLORS.bench },
+    { key: "eu", label: "Eunan", color: COLORS.eu },
   ].filter((s) => d[s.key].some((x) => x != null));
   const shown = series.filter((s) => !state.hidden[s.key]);
   $("#cmpSummary").innerHTML = shown.map((s) => { const r = last(d[s.key]);
@@ -375,7 +378,7 @@ function drawCompare() {
   const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
   const fmt = (t) => new Date(t * 1000).toLocaleString(undefined, span < 20 ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
   const labels = d.keys.map(fmt);
-  const datasets = series.map((s) => ({ hidden: !!state.hidden[s.key], label: s.label, data: [...d[s.key]], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" ? 2 : 2.5, tension: 0.15, spanGaps: true }));
+  const datasets = series.map((s) => ({ hidden: !!state.hidden[s.key], label: s.label, data: [...d[s.key]], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" || s.key === "eu" ? 2 : 2.5, tension: 0.15, spanGaps: true }));
   const wi = whatIf(d);
   if (wi) {
     // Extend the x-axis to the target, spaced like the trading-hours data so far.
