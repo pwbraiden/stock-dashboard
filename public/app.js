@@ -455,8 +455,11 @@ function whatIf(d) {
   $("#wiNow").textContent = d.bLast ? `(now ${money(d.bLast, "USD")})` : "";
   if (!d.bLast) return null;
   const q = qqqTarget(d), B = state.base, method = mode === "recovery" ? whatIfRecovery : mode === "targets" ? whatIfTargets : whatIfBeta;
-  const out = [q.line], body = [], missing = new Set(), ret = {};
-  let head = "";
+  const out = [q.line], missing = new Set(), ret = {}, all = {};
+  for (const o of ["me", "gf"]) for (const r of (state.rows[o] || []).filter((r) => r.valueBase != null))
+    all[r.symbol] = all[r.symbol] ? { ...all[r.symbol], valueBase: all[r.symbol].valueBase + r.valueBase } : { ...r };
+  const allRows = Object.values(all).sort((x, y) => y.valueBase - x.valueBase);
+  const table = allRows.length ? method(d, allRows, allRows.reduce((a, r) => a + r.valueBase, 0), q) : null;
   for (const o of ["me", "gf"]) {
     const rows = (state.rows[o] || []).filter((r) => r.valueBase != null);
     if (!rows.length) continue;
@@ -465,14 +468,15 @@ function whatIf(d) {
     if (!res) { out.push(`${name}: <span class="muted">set a QQQ target above</span>`); continue; }
     const last = [...d[o]].reverse().find((x) => x != null);
     ret[o] = last != null ? ((1 + last / 100) * (1 + res.pm) - 1) * 100 : null;
-    head = res.head; res.missing.forEach((m) => missing.add(m));
-    body.push(`<tr class="grp"><td colspan="${res.cols}">${name}</td></tr>` + res.body);
+    res.missing.forEach((m) => missing.add(m));
     out.push(`${name}${res.extra || ""} → <b class="${cls(res.pm)}">${pct(res.pm * 100)}</b> = ${signed(total * res.pm, B)}, value <b>${money(total * (1 + res.pm), B)}</b>, since start <b class="${cls(ret[o])}">${pct(ret[o])}</b>`);
   }
   $("#wiOut").innerHTML = out.join("<br>");
-  $("#wiTable").classList.toggle("hidden", !body.length);
-  $("#wiTable thead").innerHTML = head;
-  if (!$("#wiTable").contains(document.activeElement)) $("#wiTable tbody").innerHTML = body.join("");
+  $("#wiTable").classList.toggle("hidden", !table);
+  if (table) {
+    $("#wiTable thead").innerHTML = table.head;
+    if (!$("#wiTable").contains(document.activeElement)) $("#wiTable tbody").innerHTML = table.body;
+  }
   $("#wiNote").textContent = missing.size ? `No data for ${[...missing].join(", ")}, so left out.` : "";
   if (!q.imp && !Object.keys(ret).length) return null;
   return { benchRet: q.imp && d.b0 ? (q.imp / d.b0 - 1) * 100 : null, benchLabel: q.label, ret, when: targetWhen() };
