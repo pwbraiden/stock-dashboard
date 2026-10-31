@@ -3,7 +3,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const START = "2026-10-05";
 const OWNERS = ["me", "gf"];
 const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b", eu: "#a78bfa" };
-const BENCH = "QQQ", GLOBAL = "GEISAC.FGI";
+const BENCH = "QQQ", GLOBAL = "VT";
 const state = {
   lots: [], quotes: {}, fx: {}, rows: {}, about: {},
   base: "USD",
