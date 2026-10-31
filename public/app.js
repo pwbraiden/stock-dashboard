@@ -311,19 +311,29 @@ function ffill(points, keys) {
   return out;
 }
 
+// Chart starts at the girlfriend's first order (falls back to START).
+function chartStart() {
+  const dated = state.lots.filter((l) => l.date && l.date >= START);
+  const pick = (ls) => ls.reduce((a, l) => (!a || lotWhen(l) < lotWhen(a) ? l : a), null);
+  const first = pick(dated.filter((l) => ownerOf(l) === "gf")) || pick(dated);
+  return first ? { when: lotWhen(first), lot: first } : { when: START + "T00:00", lot: null };
+}
+
 async function renderCompare() {
   const seq = ++cmp.seq;
+  const start = chartStart(), startDay = start.when.slice(0, 10);
   const syms = [...new Set(state.lots.map((l) => l.symbol))];
-  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${START}`).catch(() => null);
+  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${startDay}`).catch(() => null);
   const [bench, ...hs] = await Promise.all([BENCH, ...syms].map(get));
   if (seq !== cmp.seq) return;
   if (!bench || !bench.points.length) { $("#cmpNote").textContent = `Couldn't load ${BENCH} prices.`; return; }
   const H = {}; syms.forEach((s, i) => (H[s] = hs[i]?.points || []));
-  const keys = bench.points.map((p) => p[0]).filter((t) => localDay(t) >= START);
+  const keys = bench.points.map((p) => p[0]).filter((t) => localWhen(t) >= start.when);
+  if (!keys.length) { $("#cmpNote").textContent = `No ${BENCH} prices yet after the first order.`; return; }
   const px = {}; syms.forEach((s) => (px[s] = ffill(H[s], keys)));
   const bpx = ffill(bench.points, keys);
   const fxOf = (s) => { const c = state.quotes[s]?.currency || hs[syms.indexOf(s)]?.currency || "USD"; return state.fx[c] ?? (c === state.base ? 1 : null); };
-  // Lots bought before START are measured from their first price on/after START.
+  // Lots bought before the chart start are measured from their first price after it.
   const firstPx = {}; syms.forEach((s) => (firstPx[s] = px[s].find((p) => p != null) ?? null));
   const line = (o) => {
     const lots = state.lots.filter((l) => ownerOf(l) === o);
@@ -332,7 +342,7 @@ async function renderCompare() {
       for (const l of lots) {
         if (l.date && lotWhen(l) > when) continue;
         const p = px[l.symbol][i], f = fxOf(l.symbol);
-        const basis = l.date && l.date >= START ? l.price : firstPx[l.symbol];
+        const basis = l.date && lotWhen(l) >= start.when ? l.price : firstPx[l.symbol];
         if (p == null || f == null || basis == null) continue;
         v += l.shares * p * f; c += l.shares * basis * f;
       }
@@ -340,6 +350,9 @@ async function renderCompare() {
     });
   };
   const b0 = bpx.find((p) => p != null);
+  const sd = new Date(start.when);
+  $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
+    (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
   cmp.data = { keys, me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
   drawCompare();
 }
@@ -355,7 +368,7 @@ function drawCompare() {
   const shown = series.filter((s) => !state.hidden[s.key]);
   $("#cmpSummary").innerHTML = shown.map((s) => { const r = last(d[s.key]);
     return `<span><span class="dot" style="background:${s.color}"></span>${esc(s.label)}<b class="${cls(r)}">${pct(r)}</b></span>`; }).join("");
-  $("#cmpNote").textContent = `Return on the money you put in since ${$("#startLbl").textContent}, in each stock's own currency. ${BENCH} measured from its first price on ${$("#startLbl").textContent}. Buying more doesn't count as a gain.`;
+  $("#cmpNote").textContent = `Return on the money put in, in each stock's own currency. ${BENCH} measured from its first price after the start. Buying more doesn't count as a gain.`;
   const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
   const fmt = (t) => new Date(t * 1000).toLocaleString(undefined, span < 20 ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
   charts.cmp?.destroy();
@@ -372,7 +385,6 @@ function drawCompare() {
   });
 }
 
-$("#startLbl").textContent = new Date(START + "T12:00").toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
 
 (async () => {
   chartDefaults();
