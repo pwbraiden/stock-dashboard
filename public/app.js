@@ -644,24 +644,38 @@ $("#shareBtn").onclick = async () => {
 
 // ---- Suggestions: top 5 per bucket by upside to recent analyst targets ----
 async function loadSuggest() {
-  const b = $("#sgBucket").value, tb = $("#sgTable tbody");
-  localStorage.setItem("sgBucket", b);
+  const b = $("#sgBucket").value, y = $("#sgAsof").value, tb = $("#sgTable tbody");
+  localStorage.setItem("sgBucket", b); localStorage.setItem("sgAsof", y);
+  const thisYear = String(new Date().getFullYear());
+  const cols = y
+    ? ["Stock", "Price 1 Jan", "Avg target", "Upside", y === thisYear ? "Return to date" : "Return to 31 Dec", "Hit target"]
+    : ["Stock", "Price", "Avg target", "Upside", "Off year high", "1 week"];
+  $("#sgTable thead").innerHTML = "<tr>" + cols.map((c, i) => `<th${i ? ' class="num"' : ""}>${c}</th>`).join("") + "</tr>";
   tb.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`; $("#sgNote").textContent = "";
   try {
-    const d = await api("/api/suggest?bucket=" + b);
-    if ($("#sgBucket").value !== b) return;
+    const d = await api(`/api/suggest?bucket=${b}&asof=${y}`);
+    if ($("#sgBucket").value !== b || $("#sgAsof").value !== y) return;
     tb.innerHTML = d.top.map((r) => `<tr>
       <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${esc(r.name)}</div></td>
       <td class="num">${money(r.price, r.currency)}</td>
       <td class="num">${money(r.target, r.currency)}<div class="small muted">${r.n} analysts</div></td>
       <td class="num"><span class="pill ${cls(r.upside)}">${pct(r.upside)}</span></td>
-      <td class="num ${cls(r.offHigh)}">${pct(r.offHigh)}</td>
-      <td class="num ${cls(r.week)}">${pct(r.week)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No stocks qualify right now.</td></tr>`;
-    $("#sgNote").textContent = `Average of each analyst's latest target since ${fmtDay(d.since)} (min ${d.min} analysts) · ${d.qualified} of ${d.checked} stocks qualify`;
-  } catch (e) { tb.innerHTML = `<tr><td colspan="6" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`; }
+      ${y
+        ? `<td class="num"><span class="pill ${cls(r.ret)}">${pct(r.ret)}</span></td>
+           <td class="num ${r.hit ? "up" : "muted"}">${r.hit ? "✓ " + fmtDay(r.hit) : "No"}</td>`
+        : `<td class="num ${cls(r.offHigh)}">${pct(r.offHigh)}</td><td class="num ${cls(r.week)}">${pct(r.week)}</td>`}</tr>`).join("")
+      || `<tr><td colspan="6" class="muted">No stocks qualify.</td></tr>`;
+    const avg = (k) => d.top.length ? d.top.reduce((s, r) => s + r[k], 0) / d.top.length : 0;
+    $("#sgNote").textContent = (y
+      ? `Average of each analyst's latest target from ${fmtDay(d.since)} to 1 Jan ${y}, vs the open on the first trading day · top 5 averaged ${pct(avg("ret"))} · `
+      : `Average of each analyst's latest target since ${fmtDay(d.since)} · `) + `min ${d.min} analysts · ${d.qualified} of ${d.checked} stocks qualify`;
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="6" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`;
+  }
 }
 $("#sgBucket").value = localStorage.getItem("sgBucket") || "ai";
-$("#sgBucket").onchange = loadSuggest;
+$("#sgAsof").value = localStorage.getItem("sgAsof") || "";
+$("#sgBucket").onchange = $("#sgAsof").onchange = loadSuggest;
 
 (async () => {
   chartDefaults();
