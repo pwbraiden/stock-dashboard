@@ -161,51 +161,55 @@ def ts_of(day):
     return time.mktime(time.strptime(day, "%Y-%m-%d"))
 
 
-def candidate(symbol, asof=None):
-    """Latest target per analyst firm in the window, ranked later by upside.
+HIST_YEARS = (2026, 2025)
 
-    asof=None: targets since TARGETS_SINCE vs today's price, plus % off year high and 1-week return.
-    asof=YEAR: targets from 1 Sep of YEAR-1 to 1 Jan YEAR vs the open on YEAR's first trading day,
-    plus the return since (to 31 Dec, or to today for the current year) and whether the target was hit.
-    Prices from Yahoo's chart are split-adjusted, so targets are adjusted for later splits too.
-    """
-    start, end = (ts_of(TARGETS_SINCE), time.time()) if asof is None else (ts_of("%d-09-01" % (asof - 1)), ts_of("%d-01-01" % asof))
+
+def candidate(symbol):
+    """Latest target per analyst firm since TARGETS_SINCE vs today's price, plus % off year high, 1-week return,
+    and the same snapshot at the open on 1 Jan of HIST_YEARS (targets from 1 Sep of the year before to 1 Jan).
+    Yahoo chart prices are split-adjusted, so targets are adjusted for later splits too."""
     res = qsummary(symbol, "upgradeDowngradeHistory,price")
     if not res:
         return None
-    latest = {}
-    for h in (res.get("upgradeDowngradeHistory") or {}).get("history") or []:
-        t = h.get("epochGradeDate", 0)
-        if start <= t < end and h.get("currentPriceTarget") and h["firm"] not in latest:
-            latest[h["firm"]] = (t, h["currentPriceTarget"])  # history is newest first
-    if len(latest) < MIN_TARGETS:
-        return {"symbol": symbol, "n": len(latest)}
-    from_ts = int(start if asof else ts_of("%d-01-01" % time.localtime().tm_year))
-    ch, meta, currency, scale = chart(symbol, interval="1d", ttl=3600, period1=from_ts, events="split")
+    hist = (res.get("upgradeDowngradeHistory") or {}).get("history") or []
+
+    def latest(start, end):
+        out = {}
+        for h in hist:  # newest first
+            t = h.get("epochGradeDate", 0)
+            if start <= t < end and h.get("currentPriceTarget") and h["firm"] not in out:
+                out[h["firm"]] = (t, h["currentPriceTarget"])
+        return out
+
+    now = latest(ts_of(TARGETS_SINCE), time.time())
+    if len(now) < MIN_TARGETS:
+        return {"symbol": symbol, "n": len(now)}
+    ch, meta, currency, scale = chart(symbol, interval="1d", ttl=3600, period1=int(ts_of("%d-09-01" % (min(HIST_YEARS) - 1))), events="split")
     splits = list(((ch.get("events") or {}).get("splits") or {}).values())
-    adj = lambda t, v: v / _prod(s["numerator"] / s["denominator"] for s in splits if s["date"] > t)  # noqa: E731
-    target = sum(adj(t, v) for t, v in latest.values()) / len(latest)
+    avg = lambda d: sum(v / _prod(s["numerator"] / s["denominator"] for s in splits if s["date"] > t) for t, v in d.values()) / len(d)  # noqa: E731
     q = ch.get("indicators", {}).get("quote", [{}])[0]
     rows = [(t, o * scale, h * scale, c * scale) for t, o, h, c in zip(ch.get("timestamp") or [], q.get("open") or [], q.get("high") or [], q.get("close") or [])
             if None not in (o, h, c)]
+    price = (meta.get("regularMarketPrice") or 0) * scale or (rows[-1][3] if rows else None)
+    if not price:
+        return None
+    ytd = [r for r in rows if r[0] >= ts_of("%d-01-01" % time.localtime().tm_year)]
+    high = max([r[2] for r in ytd] or [price])
+    wk = [r[3] for r in rows if r[0] <= time.time() - 7 * 86400]
+    target = avg(now)
+    past = {}
+    for y in HIST_YEARS:
+        jan = next((r[1] for r in rows if ts_of("%d-01-01" % y) <= r[0] < ts_of("%d-01-10" % y)), None)  # None if listed later
+        d = latest(ts_of("%d-09-01" % (y - 1)), ts_of("%d-01-01" % y))
+        t = avg(d) if len(d) >= MIN_TARGETS else None
+        past[y] = {"price": jan, "target": t, "n": len(d), "upside": (t / jan - 1) * 100 if t and jan else None,
+                   "ret": (price / jan - 1) * 100 if jan else None}
     pr = res.get("price") or {}
-    out = {"symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency, "target": target, "n": len(latest)}
-    now_price = (meta.get("regularMarketPrice") or 0) * scale or (rows[-1][3] if rows else None)
-    if asof is None:
-        if not rows or not now_price:
-            return None
-        high = max(r[2] for r in rows)
-        wk = [r[3] for r in rows if r[0] <= time.time() - 7 * 86400]
-        return {**out, "price": now_price, "upside": (target / now_price - 1) * 100,
-                "offHigh": (now_price / max(high, now_price) - 1) * 100, "week": (now_price / wk[-1] - 1) * 100 if wk else None}
-    period = [r for r in rows if end <= r[0] < ts_of("%d-01-01" % (asof + 1))]
-    if not period:
-        return None  # not listed yet
-    price = period[0][1]
-    last = now_price if asof >= time.localtime().tm_year else period[-1][3]
-    hit = next((r[0] for r in period if r[2] >= target), None)
-    return {**out, "price": price, "upside": (target / price - 1) * 100, "ret": (last / price - 1) * 100,
-            "hit": time.strftime("%Y-%m-%d", time.localtime(hit)) if hit else None}
+    return {
+        "symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency,
+        "price": price, "target": target, "n": len(now), "upside": (target / price - 1) * 100,
+        "offHigh": (price / max(high, price) - 1) * 100, "week": (price / wk[-1] - 1) * 100 if wk else None, "past": past,
+    }
 
 
 def _prod(xs):
@@ -215,16 +219,16 @@ def _prod(xs):
     return p
 
 
-def suggest(bucket, asof=None):
-    key = "suggest:%s:%s" % (bucket, asof)
+def suggest(bucket):
+    key = "suggest:" + bucket
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < 6 * 3600:
         return hit[1]
     syms = BUCKETS[bucket].split()
     with ThreadPoolExecutor(12) as ex:
-        rows = [r for r in ex.map(lambda s: _safe(candidate, s, asof), syms) if r and r.get("target")]
+        rows = [r for r in ex.map(lambda s: _safe(candidate, s), syms) if r and r.get("target")]
     rows.sort(key=lambda r: -r["upside"])
-    out = {"bucket": bucket, "asof": asof, "since": TARGETS_SINCE if asof is None else "%d-09-01" % (asof - 1), "min": MIN_TARGETS, "checked": len(syms), "qualified": len(rows), "top": rows[:5]}
+    out = {"bucket": bucket, "since": TARGETS_SINCE, "years": HIST_YEARS, "min": MIN_TARGETS, "checked": len(syms), "qualified": len(rows), "top": rows[:5]}
     _cache[key] = (time.time(), out)
     return out
 
@@ -253,9 +257,7 @@ def route(path):
                 return 200, dict(zip(syms, ex.map(targets, syms)))
         if u.path == "/api/suggest":
             b = qs.get("bucket", ["ai"])[0]
-            y = qs.get("asof", [""])[0]
-            asof = int(y) if y.isdigit() and 2020 <= int(y) <= time.localtime().tm_year else None
-            return (200, suggest(b, asof)) if b in BUCKETS else (400, {"error": "unknown bucket"})
+            return (200, suggest(b)) if b in BUCKETS else (400, {"error": "unknown bucket"})
         if u.path == "/api/search":
             return 200, search(qs.get("q", [""])[0])
     except Exception as e:  # noqa: BLE001
