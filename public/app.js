@@ -462,26 +462,19 @@ function whatIf(d) {
   const allRows = Object.values(all).sort((x, y) => y.valueBase - x.valueBase);
   const table = allRows.length ? method(d, allRows, allRows.reduce((a, r) => a + r.valueBase, 0), q) : null;
   const res_rows = [];
-  let sumNow = 0, sumThen = 0;
   for (const o of ["me", "gf"]) {
     const rows = (state.rows[o] || []).filter((r) => r.valueBase != null);
     if (!rows.length) continue;
     const total = rows.reduce((a, r) => a + r.valueBase, 0), name = `<span class="dot" style="background:${COLORS[o]}"></span>${esc(state.names[o])}`;
     const res = method(d, rows, total, q);
-    if (!res) { res_rows.push(`<tr><td>${name}</td><td class="num">${money(total, B)}</td><td colspan="4" class="muted">set a QQQ target above</td></tr>`); continue; }
+    if (!res) { res_rows.push(`<tr><td>${name}</td><td class="num">${money(total, B)}</td><td colspan="3" class="muted">set a QQQ target above</td></tr>`); continue; }
     const last = [...d[o]].reverse().find((x) => x != null);
     ret[o] = last != null ? ((1 + last / 100) * (1 + res.pm) - 1) * 100 : null;
     res.missing.forEach((m) => missing.add(m));
-    sumNow += total; sumThen += total * (1 + res.pm);
     res_rows.push(`<tr><td>${name}${res.extra ? `<div class="small muted">${res.extra.replace(/^\s*\(|\)\s*$/g, "")}</div>` : ""}</td><td class="num">${money(total, B)}</td><td class="num"><b>${money(total * (1 + res.pm), B)}</b></td>
-      <td class="num ${cls(res.pm)}">${signed(total * res.pm, B)}</td><td class="num"><span class="pill ${cls(res.pm)}">${pct(res.pm * 100)}</span></td><td class="num ${cls(ret[o])}">${pct(ret[o])}</td></tr>`);
+      <td class="num ${cls(res.pm)}">${signed(total * res.pm, B)}</td><td class="num"><span class="pill ${cls(res.pm)}">${pct(res.pm * 100)}</span></td></tr>`);
   }
-  if (res_rows.length > 1 && sumNow) {
-    const pm = sumThen / sumNow - 1;
-    res_rows.push(`<tr class="wi-total"><td>Together</td><td class="num">${money(sumNow, B)}</td><td class="num"><b>${money(sumThen, B)}</b></td>
-      <td class="num ${cls(pm)}">${signed(sumThen - sumNow, B)}</td><td class="num"><span class="pill ${cls(pm)}">${pct(pm * 100)}</span></td><td></td></tr>`);
-  }
-  if (res_rows.length) out.push(`<div class="table-wrap"><table class="holdings wi-res"><thead><tr><th>Portfolio</th><th class="num">Today</th><th class="num">If it plays out</th><th class="num">Gain</th><th class="num">Move</th><th class="num">Since start</th></tr></thead><tbody>${res_rows.join("")}</tbody></table></div>`);
+  if (res_rows.length) out.push(`<div class="table-wrap"><table class="holdings wi-res"><thead><tr><th>Portfolio</th><th class="num">Today</th><th class="num">If it plays out</th><th class="num">Gain</th><th class="num">Move</th></tr></thead><tbody>${res_rows.join("")}</tbody></table></div>`);
   $("#wiOut").innerHTML = out.join("");
   $("#wiTable").classList.toggle("hidden", !table);
   if (table) {
