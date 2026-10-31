@@ -433,7 +433,7 @@ async function loadBetas(syms) {
 const betaOf = (s) => betaOverride[s] ?? betas[s] ?? null;
 
 const wiMode = () => (["recovery", "targets"].includes(wiState.mode) ? wiState.mode : "beta");
-const qqqSrc = () => wiState.qsrc || "price";
+const qqqSrc = () => (/^\d+$/.test(wiState.qsrc || "") ? "banks" : wiState.qsrc || "price");
 const myQqq = () => (+wiState.price > 0 ? +wiState.price : null);
 const targetWhen = () => (wiState.date ? `${wiState.date}T${wiState.time || "22:00"}` : null);
 const fmtDay = (day) => new Date(day + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -448,12 +448,11 @@ function qqqTarget(d) {
     const peak = peaks[`${BENCH}|${recFrom()}`]; imp = recoverTo(now, peak); label = `${BENCH} implied`;
     how = `takes back ${recPct()}% of drop from high ${money(peak, "USD")}`;
   } else {
-    const bank = BANKS[+src]; label = `${BENCH} (${bank[0]})`;
-    if (spx.now && spx.beta != null) {
-      const sm = bank[1] / spx.now - 1; imp = now * (1 + spx.beta * sm);
-      how = `${esc(bank[0])}: S&P 500 ${bank[1].toLocaleString()} (now ${Math.round(spx.now).toLocaleString()}, ${pct(sm * 100)}) × beta ${spx.beta.toFixed(2)}`;
-    } else how = "loading S&P 500 data…";
-    note = ` Bank targets are for the S&P 500 at end of 2026 (Reuters, 6 Oct; Bloomberg survey, 26 Oct); ${BENCH} is moved by its beta to the S&P 500 since 2023.`;
+    const avg = bankAvg(), used = banksUsed(), old = BANKS.filter((b) => !used.includes(b));
+    imp = avg * SPX_TO_QQQ; label = `${BENCH} (bank avg)`;
+    how = `average of ${used.length} banks' S&P 500 targets ${Math.round(avg).toLocaleString()}; S&P 8,000 = ${BENCH} $760`;
+    note = ` Bank average uses year-end 2026 S&P 500 targets given or restated since ${fmtDay(BANK_SINCE)}: ${used.map((b) => `${b[0]} ${b[1].toLocaleString()} (${fmtDay(b[2])})`).join(", ")}.` +
+      (old.length ? ` Left out (no update since then): ${old.map((b) => `${b[0]} ${b[1].toLocaleString()} (${fmtDay(b[2])})`).join(", ")}.` : "") + ` ${BENCH} = S&P 500 × 760/8,000.`;
   }
   const line = imp ? `${BENCH} ${money(now, "USD")} → <b>${money(imp, "USD")}</b> = <b class="${cls(imp - now)}">${pct((imp / now - 1) * 100)}</b> <span class="muted">(${how})</span>`
     : `${BENCH}: <span class="muted">${src === "price" ? "type a QQQ price above" : how}</span>`;
@@ -517,24 +516,18 @@ function whatIfRecovery(d, rows, total) {
 
 // Price targets: each stock -> analyst consensus or own target; QQQ -> own price or bank S&P 500 target.
 // Year-end 2026 S&P 500 targets (Reuters factbox 6 Oct 2026; Bloomberg survey 26 Oct 2026).
-const BANKS = [["Bloomberg survey average (19)", 7967], ["BofA", 7400], ["Canaccord Genuity", 7500], ["BNP Paribas", 7500], ["Wells Fargo", 7700],
-  ["Evercore ISI", 7750], ["Seaport", 7800], ["RBC", 7900], ["Stifel", 7900], ["Barclays", 7950], ["Jefferies", 8000], ["J.P. Morgan", 8000],
-  ["Deutsche Bank", 8000], ["Societe Generale", 8000], ["Goldman Sachs", 8000], ["Morgan Stanley", 8000], ["UBS", 8100], ["Oppenheimer", 8100],
-  ["Citigroup", 8100], ["HSBC", 8100]];
-const SPX = "^GSPC";
-const analyst = {}; const spx = {};
+// Year-end 2026 S&P 500 targets: [bank, target, date of latest note setting or restating it].
+const BANKS = [["BofA", 7400, "2026-09-14"], ["Goldman Sachs", 8000, "2026-10-19"], ["Morgan Stanley", 8000, "2026-10-26"],
+  ["J.P. Morgan", 8000, "2026-08-10"], ["Citigroup", 8100, "2026-10-28"], ["UBS", 8100, "2026-09-15"],
+  ["Deutsche Bank", 8000, "2026-09-18"], ["Jefferies", 8000, "2026-09-16"], ["Barclays", 7950, "2026-09-09"]];
+const BANK_SINCE = "2026-09-01";
+const SPX_TO_QQQ = 760 / 8000;
+const banksUsed = () => BANKS.filter((b) => b[2] >= BANK_SINCE);
+const bankAvg = () => { const u = banksUsed(); return u.reduce((a, b) => a + b[1], 0) / u.length; };
+const analyst = {};
 async function loadTargets(syms) {
   const need = syms.filter((s) => !(s in analyst));
   if (need.length) await api(`/api/targets?symbols=${need.map(encodeURIComponent).join(",")}`).then((r) => need.forEach((s) => (analyst[s] = r[s] || null))).catch(() => {});
-}
-async function loadSpx() {
-  const jobs = [];
-  if (spx.now == null) jobs.push(api(`/api/quotes?symbols=${encodeURIComponent(SPX)}`).then((r) => (spx.now = r[SPX]?.price ?? null)).catch(() => {}));
-  if (spx.beta == null) {
-    const h = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${BETA_START}`).catch(() => null);
-    jobs.push(Promise.all([h(BENCH), h(SPX)]).then(([q, m]) => (spx.beta = q && m ? betaFrom(q.points, m.points) : null)));
-  }
-  await Promise.all(jobs);
 }
 function betaFrom(pts, ref) {
   const rets = (p) => { const m = {}; for (let i = 1; i < p.length; i++) m[localDay(p[i][0])] = p[i][1] / p[i - 1][1] - 1; return m; };
@@ -590,17 +583,16 @@ const loadWi = () => {
   const mode = wiMode(), src = qqqSrc(), pk = [];
   if (src === "rule") pk.push(BENCH);
   if (mode === "recovery") pk.push(...gfSyms());
-  return Promise.all([pk.length ? loadPeaks(pk, recFrom()) : null, mode === "targets" ? loadTargets(gfSyms()) : null, /^\d+$/.test(src) ? loadSpx() : null]);
+  return Promise.all([pk.length ? loadPeaks(pk, recFrom()) : null, mode === "targets" ? loadTargets(gfSyms()) : null]);
 };
 async function redrawWi() {
   drawCompare(); await loadWi(); drawCompare();
 }
 $("#wiQqq").addEventListener("change", (e) => {
   const v = (wiState.qsrc = e.target.value);
-  if (/^\d+$/.test(v) && !wiState.date) { wiState.date = new Date().getFullYear() + "-12-31"; $("#wiDate").value = wiState.date; }
+  if (v === "banks" && !wiState.date) { wiState.date = new Date().getFullYear() + "-12-31"; $("#wiDate").value = wiState.date; }
   saveWi(); redrawWi();
 });
-$("#wiBanks").innerHTML = BANKS.map((b, i) => `<option value="${i}">${esc(b[0])}: ${b[1].toLocaleString()}</option>`).join("");
 fillWi();
 Object.keys(WI).forEach((id) => $("#" + id).addEventListener("input", () => { wiState[WI[id]] = $("#" + id).value; saveWi(); redrawWi(); }));
 $("#wiMode").addEventListener("click", (e) => { const m = e.target.dataset?.mode; if (!m) return; wiState.mode = m; saveWi(); redrawWi(); });
