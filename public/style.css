@@ -4,7 +4,7 @@ body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-ser
 header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:18px 28px;border-bottom:1px solid var(--line);background:var(--panel)}
 h1{margin:0;font-size:22px}h2{margin:0 0 12px;font-size:16px}h3{font-size:14px;margin:18px 0 8px;color:var(--muted)}
 .header-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-main{padding:24px 28px;max-width:1400px;margin:0 auto}
+main{padding:24px 28px;max-width:1600px;margin:0 auto}
 .muted{color:var(--muted)}.small{font-size:12px}.hidden{display:none!important}
 button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:14px}
 button.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
@@ -50,3 +50,17 @@ footer{margin-top:24px;text-align:center}footer a{color:var(--accent)}
 .cmp-summary{display:flex;gap:28px;flex-wrap:wrap;margin:4px 0 10px;font-size:14px}
 .cmp-summary b{font-size:18px;margin-left:6px}
 .cmp-summary .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px;align-items:start}
+.layout .panel{margin-bottom:0}.side{display:flex;flex-direction:column;gap:20px}
+#compare{position:sticky;top:16px}.chart-main{height:520px}
+@media (max-width:1000px){main{padding:16px 12px}.layout{grid-template-columns:minmax(0,1fr)}#compare{position:static}.chart-main{height:360px}}
+.owner h2{display:flex;align-items:center;gap:6px}.owner .dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+.owner[data-owner=me] .dot{background:#4f8cff}.owner[data-owner=gf] .dot{background:#ec4899}
+.small-btn{padding:4px 12px;font-size:13px}
+.totals{display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:6px}.totals b{display:block;font-size:18px;color:var(--text)}
+.holdings th,.holdings td{padding:8px 8px;font-size:13px}.holdings th{font-size:11px;cursor:pointer;user-select:none}.holdings th:hover{color:var(--text)}
+.holdings tbody tr{cursor:pointer}.holdings tbody tr:hover{background:var(--panel2)}
+.holdings .name{max-width:130px}
+.table-wrap{scrollbar-color:var(--line) transparent}
+dialog select{width:100%;margin-top:4px}
+#stockDialog{width:min(820px,95vw)}

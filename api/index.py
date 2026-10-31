@@ -33,9 +33,10 @@ def fetch_json(url, ttl):
     return data
 
 
-def chart(symbol, rng="1d", interval="1d", ttl=30):
-    url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?range=%s&interval=%s" % (
-        urllib.parse.quote(symbol), rng, interval)
+def chart(symbol, rng="1d", interval="1d", ttl=30, period1=None):
+    span = "period1=%d&period2=%d" % (period1, int(time.time()) // 60 * 60) if period1 else "range=" + rng
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?%s&interval=%s" % (
+        urllib.parse.quote(symbol), span, interval)
     res = fetch_json(url, ttl)["chart"]["result"][0]
     meta = res["meta"]
     scale = 1.0
@@ -67,9 +68,15 @@ def quote(symbol):
         return {"symbol": symbol, "error": str(e)}
 
 
-def history(symbol, rng):
-    interval = {"1d": "5m", "5d": "30m", "1mo": "1d", "6mo": "1d", "ytd": "1d", "1y": "1d", "5y": "1wk", "max": "1mo"}.get(rng, "1d")
-    res, meta, currency, scale = chart(symbol, rng, interval, ttl=120)
+def history(symbol, rng, start=None):
+    period1 = None
+    if start:
+        period1 = int(time.mktime(time.strptime(start, "%Y-%m-%d"))) - 86400
+        days = (time.time() - period1) / 86400
+        interval = "30m" if days < 55 else "1h" if days < 700 else "1d"
+    else:
+        interval = {"1d": "5m", "5d": "30m", "1mo": "1d", "6mo": "1d", "ytd": "1d", "1y": "1d", "5y": "1wk", "max": "1mo"}.get(rng, "1d")
+    res, meta, currency, scale = chart(symbol, rng, interval, ttl=120, period1=period1)
     ts = res.get("timestamp") or []
     closes = res.get("indicators", {}).get("quote", [{}])[0].get("close") or []
     pts = [[t, c * scale] for t, c in zip(ts, closes) if c is not None]
@@ -97,7 +104,7 @@ def route(path):
             with ThreadPoolExecutor(8) as ex:
                 return 200, dict(zip(syms, ex.map(quote, syms)))
         if u.path == "/api/history":
-            return 200, history(qs["symbol"][0], qs.get("range", ["1y"])[0])
+            return 200, history(qs["symbol"][0], qs.get("range", ["1y"])[0], qs.get("start", [None])[0])
         if u.path == "/api/search":
             return 200, search(qs.get("q", [""])[0])
     except Exception as e:  # noqa: BLE001

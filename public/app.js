@@ -1,12 +1,16 @@
 const $ = (s) => document.querySelector(s);
+const START = "2026-10-27";
+const OWNERS = ["me", "gf"];
+const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b" };
+const BENCH = "QQQ";
 const state = {
-  lots: [], quotes: {}, fx: {}, rows: [],
+  lots: [], quotes: {}, fx: {}, rows: {},
   base: localStorage.getItem("base") || "EUR",
   sort: { k: "valueBase", dir: -1 },
-  selected: null, range: "1y", editId: null,
+  selected: null, editId: null,
+  names: { me: "Me", gf: "Girlfriend", ...JSON.parse(localStorage.getItem("names") || "{}") },
 };
 const charts = {};
-const PALETTE = ["#4f8cff", "#22c55e", "#f59e0b", "#a855f7", "#ef4444", "#14b8a6", "#ec4899", "#eab308", "#6366f1", "#84cc16", "#f97316", "#06b6d4"];
 
 const api = async (url, opts = {}) => {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -20,13 +24,14 @@ const signed = (v, cur) => v == null || isNaN(v) ? "–" : (v > 0 ? "+" : "") + 
 const pct = (v) => v == null || isNaN(v) ? "–" : (v > 0 ? "+" : "") + v.toFixed(2) + "%";
 const cls = (v) => v > 0 ? "up" : v < 0 ? "down" : "";
 const num = (v) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(v);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const ownerOf = (l) => (l.owner === "gf" ? "gf" : "me");
 
 const SAMPLE = [
-  { symbol: "AAPL", shares: 10, price: 150, date: "2023-03-15" },
-  { symbol: "AAPL", shares: 5, price: 190, date: "2024-06-10" },
-  { symbol: "MSFT", shares: 8, price: 310, date: "2023-05-02" },
-  { symbol: "NVDA", shares: 20, price: 45, date: "2023-01-20" },
-  { symbol: "SAP.DE", shares: 12, price: 120, date: "2023-09-01" },
+  { symbol: "AAPL", shares: 10, price: 150, date: "2023-03-15", owner: "me" },
+  { symbol: "NVDA", shares: 20, price: 45, date: "2023-01-20", owner: "me" },
+  { symbol: "MSFT", shares: 8, price: 310, date: "2023-05-02", owner: "gf" },
+  { symbol: "SAP.DE", shares: 12, price: 120, date: "2023-09-01", owner: "gf" },
 ];
 const newId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const saveLots = () => localStorage.setItem("lots", JSON.stringify(state.lots));
@@ -39,7 +44,7 @@ function loadLots() {
   $("#sampleBanner").classList.toggle("hidden", !state.lots.some((l) => l.sample));
 }
 function cleanLot(b) {
-  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || "") };
+  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || ""), owner: ownerOf(b) };
   if (!lot.symbol || !(lot.shares > 0) || !(lot.price >= 0)) throw new Error("Please enter a ticker, shares and price");
   return lot;
 }
@@ -55,9 +60,9 @@ async function loadQuotes() {
   $("#updated").textContent = "Updated " + new Date().toLocaleTimeString();
 }
 
-function compute() {
+function computeRows(lotsAll) {
   const groups = {};
-  for (const l of state.lots) (groups[l.symbol] ||= []).push(l);
+  for (const l of lotsAll) (groups[l.symbol] ||= []).push(l);
   const rows = Object.entries(groups).map(([symbol, lots]) => {
     const q = state.quotes[symbol] || {};
     const cur = q.currency || "USD";
@@ -80,55 +85,43 @@ function compute() {
       error: q.error,
     };
   });
-  const totalValue = rows.reduce((s, r) => s + (r.valueBase || 0), 0);
-  rows.forEach((r) => (r.weight = totalValue && r.valueBase != null ? (r.valueBase / totalValue) * 100 : null));
   const { k, dir } = state.sort;
   rows.sort((a, b) => {
     const x = a[k], y = b[k];
     if (typeof x === "string") return dir * x.localeCompare(y);
     return dir * ((x ?? -Infinity) - (y ?? -Infinity));
   });
-  state.rows = rows;
+  return rows;
 }
 
-function renderSummary() {
-  const B = state.base, rows = state.rows;
+function renderOwner(o) {
+  const B = state.base, rows = (state.rows[o] = computeRows(state.lots.filter((l) => ownerOf(l) === o)));
+  const box = document.querySelector(`.owner[data-owner=${o}]`);
+  box.querySelector(".oname").textContent = state.names[o];
   const value = rows.reduce((s, r) => s + (r.valueBase || 0), 0);
   const cost = rows.reduce((s, r) => s + (r.valueBase != null ? r.costBase : 0), 0);
-  const day = rows.reduce((s, r) => s + (r.dayBase || 0), 0);
-  const gain = value - cost;
-  $("#tValue").textContent = money(value, B);
-  $("#tCost").textContent = money(cost, B);
-  $("#tGain").textContent = signed(gain, B); $("#tGain").className = "value " + cls(gain);
-  $("#tGainPct").textContent = cost ? pct((gain / cost) * 100) : ""; $("#tGainPct").className = "sub " + cls(gain);
-  $("#tDay").textContent = signed(day, B); $("#tDay").className = "value " + cls(day);
-  const prevVal = value - day;
-  $("#tDayPct").textContent = prevVal ? pct((day / prevVal) * 100) : ""; $("#tDayPct").className = "sub " + cls(day);
-}
-
-function renderTable() {
-  const B = state.base;
-  const tb = $("#holdings tbody");
+  const day = rows.reduce((s, r) => s + (r.dayBase || 0), 0), gain = value - cost;
+  box.querySelector(".totals").innerHTML = rows.length ? `
+    <span>Value<b>${money(value, B)}</b></span>
+    <span>Invested<b>${money(cost, B)}</b></span>
+    <span>Gain / loss<b class="${cls(gain)}">${signed(gain, B)} <small>${cost ? pct((gain / cost) * 100) : ""}</small></b></span>
+    <span>Today<b class="${cls(day)}">${signed(day, B)}</b></span>` : "";
+  box.querySelector(".empty").classList.toggle("hidden", rows.length > 0);
+  const tb = box.querySelector("tbody");
   tb.innerHTML = "";
-  $("#empty").classList.toggle("hidden", state.rows.length > 0);
-  for (const r of state.rows) {
+  for (const r of rows) {
     const tr = document.createElement("tr");
-    if (r.symbol === state.selected) tr.classList.add("selected");
     tr.innerHTML = `
-      <td><div class="sym">${r.symbol}</div><div class="name" title="${r.name}">${r.error ? '<span class="down">Price unavailable</span>' : r.name}</div></td>
+      <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${r.error ? '<span class="down">Price unavailable</span>' : esc(r.name)}</div></td>
       <td class="num">${num(r.shares)}</td>
       <td class="num">${money(r.avg, r.cur)}</td>
-      <td class="num"><b>${money(r.price, r.cur)}</b></td>
-      <td class="num ${cls(r.dayPct)}">${pct(r.dayPct)}</td>
-      <td class="num">${money(r.costBase, B)}</td>
+      <td class="num"><b>${money(r.price, r.cur)}</b><div class="small ${cls(r.dayPct)}">${pct(r.dayPct)}</div></td>
       <td class="num"><b>${money(r.valueBase, B)}</b></td>
-      <td class="num ${cls(r.gainBase)}">${signed(r.gainBase, B)}</td>
-      <td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span></td>
-      <td class="num">${r.weight != null ? r.weight.toFixed(1) + "%" : "–"}<div class="bar"><div style="width:${r.weight || 0}%"></div></div></td>`;
-    tr.onclick = () => selectStock(r.symbol === state.selected ? null : r.symbol);
+      <td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span><div class="small ${cls(r.gainBase)}">${signed(r.gainBase, B)}</div></td>`;
+    tr.onclick = () => openStock(o, r.symbol);
     tb.appendChild(tr);
   }
-  document.querySelectorAll("#holdings th").forEach((th) => {
+  box.querySelectorAll("th").forEach((th) => {
     th.classList.toggle("sorted", th.dataset.k === state.sort.k);
     th.classList.toggle("asc", th.dataset.k === state.sort.k && state.sort.dir === 1);
   });
@@ -140,46 +133,14 @@ const chartDefaults = () => {
   Chart.defaults.font.family = "Inter, system-ui, sans-serif";
 };
 
-function renderCharts() {
-  const B = state.base;
-  const rows = state.rows.filter((r) => r.valueBase != null);
-  const alloc = [...rows].sort((a, b) => b.valueBase - a.valueBase);
-  charts.alloc?.destroy();
-  charts.alloc = new Chart($("#allocChart"), {
-    type: "doughnut",
-    data: { labels: alloc.map((r) => r.symbol), datasets: [{ data: alloc.map((r) => r.valueBase), backgroundColor: alloc.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: "#171e2e", borderWidth: 2 }] },
-    options: { maintainAspectRatio: false, animation: false, cutout: "60%",
-      plugins: { legend: { position: "right" }, tooltip: { callbacks: { label: (c) => {
-        const total = c.dataset.data.reduce((a, b) => a + b, 0);
-        return ` ${c.label}: ${money(c.raw, B)} (${((c.raw / total) * 100).toFixed(1)}%)`; } } } },
-      onClick: (_, els) => els.length && selectStock(alloc[els[0].index].symbol) },
-  });
-  const ret = [...rows].sort((a, b) => b.retPct - a.retPct);
-  charts.ret?.destroy();
-  charts.ret = new Chart($("#retChart"), {
-    type: "bar",
-    data: { labels: ret.map((r) => r.symbol), datasets: [{ data: ret.map((r) => r.retPct), backgroundColor: ret.map((r) => (r.retPct >= 0 ? "#22c55e" : "#ef4444")), borderRadius: 4 }] },
-    options: { maintainAspectRatio: false, animation: false, indexAxis: "y",
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${pct(c.raw)}  (${signed(ret[c.dataIndex].gainBase, B)})` } } },
-      scales: { x: { ticks: { callback: (v) => v + "%" } }, y: { grid: { display: false } } },
-      onClick: (_, els) => els.length && selectStock(ret[els[0].index].symbol) },
-  });
-}
-
-async function selectStock(sym) {
-  state.selected = sym;
-  renderTable();
-  $("#detail").classList.toggle("hidden", !sym);
-  if (!sym) return;
-  renderLots();
-  await renderHistory();
-  $("#detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-
+const sdlg = $("#stockDialog");
+function openStock(o, sym) { state.selected = { o, sym }; renderLots(); if (!sdlg.open) sdlg.showModal(); }
 function renderLots() {
-  const r = state.rows.find((x) => x.symbol === state.selected);
-  if (!r) { selectStock(null); return; }
-  $("#dTitle").innerHTML = `${r.symbol} <span class="muted" style="font-weight:400">${r.name}</span> &nbsp;<span>${money(r.price, r.cur)}</span> <span class="${cls(r.dayPct)} small">${pct(r.dayPct)} today</span>`;
+  if (!state.selected) return;
+  const { o, sym } = state.selected;
+  const r = (state.rows[o] || []).find((x) => x.symbol === sym);
+  if (!r) { state.selected = null; sdlg.close(); return; }
+  $("#dTitle").innerHTML = `${esc(r.symbol)} <span class="muted" style="font-weight:400">${esc(r.name)} · ${esc(state.names[o])}</span> &nbsp;<span>${money(r.price, r.cur)}</span> <span class="${cls(r.dayPct)} small">${pct(r.dayPct)} today</span>`;
   const tb = $("#lots tbody");
   tb.innerHTML = "";
   const sorted = [...r.lots].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -187,7 +148,7 @@ function renderLots() {
     const cost = l.shares * l.price, val = r.price != null ? l.shares * r.price : null;
     const g = val != null ? val - cost : null, p = g != null && cost ? (g / cost) * 100 : null;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${l.date || "–"}</td><td class="num">${num(l.shares)}</td><td class="num">${money(l.price, r.cur)}</td>
+    tr.innerHTML = `<td>${esc(l.date || "–")}</td><td class="num">${num(l.shares)}</td><td class="num">${money(l.price, r.cur)}</td>
       <td class="num">${money(cost, r.cur)}</td><td class="num">${money(val, r.cur)}</td>
       <td class="num ${cls(g)}">${signed(g, r.cur)}</td><td class="num"><span class="pill ${cls(p)}">${pct(p)}</span></td>
       <td class="num"><button class="icon" data-edit="${l.id}" title="Edit">&#9998;</button><button class="icon" data-del="${l.id}" title="Delete">&#x2715;</button></td>`;
@@ -197,55 +158,26 @@ function renderLots() {
   tr.innerHTML = `<td><b>Total</b></td><td class="num"><b>${num(r.shares)}</b></td><td class="num"><b>${money(r.avg, r.cur)}</b> <span class="muted small">avg</span></td>
     <td class="num"><b>${money(r.cost, r.cur)}</b></td><td class="num"><b>${money(r.value, r.cur)}</b></td>
     <td class="num ${cls(r.gain)}"><b>${signed(r.gain, r.cur)}</b></td><td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span></td>
-    <td class="num"><button class="icon" data-addfor="${r.symbol}" title="Add purchase">+ Add</button></td>`;
+    <td class="num"><button class="icon" data-addfor="${esc(r.symbol)}" title="Add purchase">+ Add</button></td>`;
   tb.appendChild(tr);
 }
+$("#closeStock").onclick = () => { state.selected = null; sdlg.close(); };
 
-async function renderHistory() {
-  const sym = state.selected;
-  const r = state.rows.find((x) => x.symbol === sym);
-  let h;
-  try { h = await api(`/api/history?symbol=${encodeURIComponent(sym)}&range=${state.range}`); } catch { return; }
-  if (state.selected !== sym) return;
-  const intraday = state.range === "1d" || state.range === "5d";
-  const labels = h.points.map((p) => new Date(p[0] * 1000).toLocaleDateString(undefined, intraday ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", year: "2-digit" }));
-  const data = h.points.map((p) => p[1]);
-  const up = data.length && data[data.length - 1] >= data[0];
-  const color = up ? "#22c55e" : "#ef4444";
-  const ctx = $("#histChart").getContext("2d");
-  const grad = ctx.createLinearGradient(0, 0, 0, 340);
-  grad.addColorStop(0, up ? "rgba(34,197,94,.25)" : "rgba(239,68,68,.25)"); grad.addColorStop(1, "rgba(0,0,0,0)");
-  charts.hist?.destroy();
-  charts.hist = new Chart(ctx, {
-    type: "line",
-    data: { labels, datasets: [
-      { label: "Price", data, borderColor: color, backgroundColor: grad, fill: true, pointRadius: 0, borderWidth: 2, tension: 0.15 },
-      { label: "Your avg buy price", data: data.map(() => r.avg), borderColor: "#4f8cff", borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5, fill: false },
-    ] },
-    options: { maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${money(c.raw, h.currency)}` } } },
-      scales: { x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } }, y: { ticks: { callback: (v) => money(v, h.currency) } } } },
-  });
-}
+function renderAll() { OWNERS.forEach(renderOwner); renderLots(); if (cmp.data) drawCompare(); }
 
-function renderAll() { compute(); renderSummary(); renderTable(); renderCharts(); if (state.selected) renderLots(); }
-
-async function refresh(withHistory = false) {
+async function refresh() {
   $("#refresh").disabled = true;
-  try {
-    await loadQuotes(); renderAll();
-    if (withHistory || cmp.base !== state.base) renderCompare();
-    if (withHistory && state.selected) await renderHistory();
-  }
+  try { await loadQuotes(); renderAll(); renderCompare(); }
   catch (e) { $("#updated").textContent = "Price update failed: " + e.message; }
   finally { $("#refresh").disabled = false; }
 }
-
 // ---- Add / edit dialog ----
 const dlg = $("#lotDialog");
 let acTimer, acItems = [], acIdx = -1;
 
-function openDialog(lot = null, symbol = "") {
+function openDialog(lot = null, symbol = "", owner = null) {
+  OWNERS.forEach((o) => ($(`#fOwner option[value=${o}]`).textContent = state.names[o]));
+  $("#fOwner").value = lot ? ownerOf(lot) : owner || localStorage.getItem("lastOwner") || "me";
   state.editId = lot ? lot.id : null;
   $("#lotDialogTitle").textContent = lot ? "Edit purchase" : "Add purchase";
   $("#fSymbol").value = lot ? lot.symbol : symbol;
@@ -304,44 +236,47 @@ $("#cancelBtn").onclick = () => dlg.close();
 $("#lotForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   let lot;
-  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value }); }
+  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value, owner: $("#fOwner").value });
+  localStorage.setItem("lastOwner", lot.owner); }
   catch (err) { $("#fInfo").innerHTML = `<span class="down">${err.message}</span>`; return; }
   if (state.editId) state.lots = state.lots.map((l) => (l.id === state.editId ? { ...lot, id: l.id } : l));
   else state.lots.push({ ...lot, id: newId() });
   saveLots(); loadLots();
   dlg.close();
-  await refresh(true);
+  await refresh();
 });
 
 $("#lots").addEventListener("click", async (e) => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.edit) openDialog(state.lots.find((l) => l.id === b.dataset.edit));
-  if (b.dataset.addfor) openDialog(null, b.dataset.addfor);
+  if (b.dataset.addfor) openDialog(null, b.dataset.addfor, state.selected?.o);
   if (b.dataset.del && confirm("Delete this purchase?")) {
     state.lots = state.lots.filter((l) => l.id !== b.dataset.del);
-    saveLots(); loadLots(); await refresh(true);
+    saveLots(); loadLots(); await refresh();
   }
 });
 
 // ---- Controls ----
 $("#clearSample").onclick = () => {
   state.lots = state.lots.filter((l) => !l.sample);
-  saveLots(); loadLots(); selectStock(null); renderAll(); refresh(true);
+  saveLots(); loadLots(); renderAll(); refresh();
 };
 $("#addBtn").onclick = () => openDialog();
-$("#refresh").onclick = () => refresh(true);
+$("#refresh").onclick = () => refresh();
 $("#base").value = state.base;
 $("#base").onchange = (e) => { state.base = e.target.value; localStorage.setItem("base", state.base); refresh(); };
-document.querySelectorAll("#holdings th").forEach((th) => th.onclick = () => {
+document.querySelectorAll(".holdings th").forEach((th) => th.onclick = () => {
   const k = th.dataset.k;
   state.sort = { k, dir: state.sort.k === k ? -state.sort.dir : (k === "symbol" ? 1 : -1) };
   renderAll();
 });
-$("#ranges").addEventListener("click", (e) => {
-  const b = e.target.closest("button"); if (!b) return;
-  state.range = b.dataset.r;
-  document.querySelectorAll("#ranges button").forEach((x) => x.classList.toggle("active", x === b));
-  renderHistory();
+document.querySelectorAll(".owner").forEach((box) => {
+  const o = box.dataset.owner;
+  box.querySelector(".addfor").onclick = () => openDialog(null, "", o);
+  box.querySelector(".rename").onclick = () => {
+    const n = prompt("Name for this portfolio:", state.names[o]);
+    if (n && n.trim()) { state.names[o] = n.trim(); localStorage.setItem("names", JSON.stringify(state.names)); renderAll(); }
+  };
 });
 $("#exportBtn").onclick = (e) => {
   e.preventDefault();
@@ -355,124 +290,80 @@ $("#importFile").onchange = async (e) => {
   if (!confirm("Replace all current holdings with the imported file?")) return;
   try {
     state.lots = JSON.parse(await f.text()).map((l) => ({ ...cleanLot(l), id: newId() }));
-    saveLots(); loadLots(); await refresh(true);
+    saveLots(); loadLots(); await refresh();
   }
   catch (err) { alert("Import failed: " + err.message); }
   e.target.value = "";
 };
-
-
-// ---- Portfolio vs benchmark ----
-const cmp = { range: "1y", mode: "pct", bench: localStorage.getItem("bench") || "QQQ", seq: 0, data: null, base: null };
-const dayKey = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+// ---- Return since START: me vs girlfriend vs QQQ ----
+const cmp = { seq: 0, data: null };
+const localDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 function ffill(points, keys) {
-  const pts = points.map((p) => [dayKey(p[0]), p[1]]);
   const out = []; let j = 0, last = null;
-  for (const k of keys) { while (j < pts.length && pts[j][0] <= k) last = pts[j++][1]; out.push(last); }
+  for (const k of keys) { while (j < points.length && points[j][0] <= k) last = points[j++][1]; out.push(last); }
   return out;
 }
 
 async function renderCompare() {
-  const seq = ++cmp.seq, B = state.base;
-  cmp.base = B;
-  const lots = state.lots, syms = [...new Set(lots.map((l) => l.symbol))];
-  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&range=${cmp.range}`).catch(() => null);
-  const [bench, ...hs] = await Promise.all([cmp.bench, ...syms].map(get));
+  const seq = ++cmp.seq;
+  const syms = [...new Set(state.lots.map((l) => l.symbol))];
+  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&start=${START}`).catch(() => null);
+  const [bench, ...hs] = await Promise.all([BENCH, ...syms].map(get));
   if (seq !== cmp.seq) return;
-  if (!bench || !bench.points.length) { $("#cmpNote").textContent = `Couldn't load ${cmp.bench} prices.`; return; }
-  const curOf = { [cmp.bench]: bench.currency };
-  syms.forEach((s, i) => (curOf[s] = hs[i]?.currency || state.quotes[s]?.currency || "USD"));
-  const curs = [...new Set(Object.values(curOf).filter((c) => c !== B))];
-  const fxh = await Promise.all(curs.map((c) => get(`${c}${B}=X`)));
-  if (seq !== cmp.seq) return;
-  const keys = [...new Set(bench.points.map((p) => dayKey(p[0])))];
-  const ones = keys.map(() => 1);
-  const fx = { [B]: ones };
-  curs.forEach((c, i) => (fx[c] = fxh[i]?.points.length ? ffill(fxh[i].points, keys) : keys.map(() => state.fx[c] ?? null)));
-  const px = {}; syms.forEach((s, i) => (px[s] = hs[i] ? ffill(hs[i].points, keys) : []));
-  const benchPx = ffill(bench.points, keys);
-  const held = (s, k) => lots.reduce((a, l) => a + (l.symbol === s && (!l.date || l.date <= k) ? l.shares : 0), 0);
-  const val = (s, i, k) => { const n = held(s, k), p = px[s][i], f = fx[curOf[s]][i]; return n && p != null && f != null ? n * p * f : null; };
-
-  const value = [], twr = []; let cum = 1;
-  keys.forEach((k, i) => {
-    let v = 0, any = false;
-    for (const s of syms) { const x = val(s, i, k); if (x != null) { v += x; any = true; } }
-    value.push(any ? v : null);
-    if (i > 0 && any) {
-      const kp = keys[i - 1]; let v0 = 0, g = 0;
-      for (const s of syms) {
-        const n = held(s, kp), p0 = px[s][i - 1], p1 = px[s][i], f0 = fx[curOf[s]][i - 1], f1 = fx[curOf[s]][i];
-        if (n && p0 != null && p1 != null && f0 != null && f1 != null) { v0 += n * p0 * f0; g += n * (p1 * f1 - p0 * f0); }
+  if (!bench || !bench.points.length) { $("#cmpNote").textContent = `Couldn't load ${BENCH} prices.`; return; }
+  const H = {}; syms.forEach((s, i) => (H[s] = hs[i]?.points || []));
+  const keys = bench.points.map((p) => p[0]).filter((t) => localDay(t) >= START);
+  const px = {}; syms.forEach((s) => (px[s] = ffill(H[s], keys)));
+  const bpx = ffill(bench.points, keys);
+  const fxOf = (s) => { const c = state.quotes[s]?.currency || hs[syms.indexOf(s)]?.currency || "USD"; return state.fx[c] ?? (c === state.base ? 1 : null); };
+  // Lots bought before START are measured from their first price on/after START.
+  const firstPx = {}; syms.forEach((s) => (firstPx[s] = px[s].find((p) => p != null) ?? null));
+  const line = (o) => {
+    const lots = state.lots.filter((l) => ownerOf(l) === o);
+    return keys.map((t, i) => {
+      const day = localDay(t); let v = 0, c = 0;
+      for (const l of lots) {
+        if (l.date && l.date > day) continue;
+        const p = px[l.symbol][i], f = fxOf(l.symbol);
+        const basis = l.date && l.date >= START ? l.price : firstPx[l.symbol];
+        if (p == null || f == null || basis == null) continue;
+        v += l.shares * p * f; c += l.shares * basis * f;
       }
-      if (v0 > 0) cum *= 1 + g / v0;
-    }
-    twr.push(any ? (cum - 1) * 100 : null);
-  });
-  let i0 = value.findIndex((v) => v != null);
-  if (i0 < 0) i0 = 0;
-  const bfx = fx[curOf[cmp.bench]];
-  const benchBase = benchPx.map((p, i) => (p != null && bfx[i] != null ? p * bfx[i] : null));
-  const b0 = benchBase[i0];
-  cmp.data = {
-    labels: keys.slice(i0), value: value.slice(i0), twr: twr.slice(i0), benchPx: benchPx.slice(i0),
-    benchPct: benchBase.slice(i0).map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)),
-    benchCur: bench.currency, converted: bench.currency !== B, B, late: i0 > 0 ? keys[i0] : null,
+      return c > 0 ? (v / c - 1) * 100 : null;
+    });
   };
+  const b0 = bpx.find((p) => p != null);
+  cmp.data = { keys, me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
   drawCompare();
 }
 
 function drawCompare() {
   const d = cmp.data; if (!d) return;
-  const name = cmp.bench.replace("^GDAXI", "DAX");
   const last = (a) => [...a].reverse().find((x) => x != null);
-  const pR = last(d.twr), bR = last(d.benchPct);
-  $("#cmpSummary").innerHTML = state.lots.length ? `
-    <span><span class="dot" style="background:#4f8cff"></span>My portfolio<b class="${cls(pR)}">${pct(pR)}</b></span>
-    <span><span class="dot" style="background:#f59e0b"></span>${name}<b class="${cls(bR)}">${pct(bR)}</b></span>
-    ${pR != null && bR != null ? `<span class="muted">You're ${pR >= bR ? "ahead of" : "behind"} ${name} by <b class="${cls(pR - bR)}">${Math.abs(pR - bR).toFixed(2)} pts</b></span>` : ""}` : "";
-  $("#cmpNote").textContent = (d.late ? `Starts ${d.late}, when your first purchase in this period was made. ` : "") +
-    (cmp.mode === "pct"
-      ? `Both lines in ${d.B}${d.converted ? ` (${name} converted from ${d.benchCur})` : ""}. Your line is the return on your stocks only; buying more doesn't move it.`
-      : `Your portfolio value in ${d.B} (right axis) includes new purchases; ${name} price in ${d.benchCur} (left axis).`);
-  const fmtLabel = (k) => new Date(k).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" });
-  const pctMode = cmp.mode === "pct";
-  const ds = pctMode
-    ? [{ label: "My portfolio", data: d.twr, borderColor: "#4f8cff", yAxisID: "y" },
-       { label: name, data: d.benchPct, borderColor: "#f59e0b", yAxisID: "y" }]
-    : [{ label: "My portfolio", data: d.value, borderColor: "#4f8cff", yAxisID: "y1" },
-       { label: `${name} price`, data: d.benchPx, borderColor: "#f59e0b", yAxisID: "y" }];
-  ds.forEach((x) => Object.assign(x, { pointRadius: 0, borderWidth: 2, tension: 0.15, spanGaps: true }));
+  const series = [
+    { key: "me", label: state.names.me, color: COLORS.me },
+    { key: "gf", label: state.names.gf, color: COLORS.gf },
+    { key: "bench", label: BENCH, color: COLORS.bench },
+  ].filter((s) => d[s.key].some((x) => x != null));
+  $("#cmpSummary").innerHTML = series.map((s) => { const r = last(d[s.key]);
+    return `<span><span class="dot" style="background:${s.color}"></span>${esc(s.label)}<b class="${cls(r)}">${pct(r)}</b></span>`; }).join("");
+  $("#cmpNote").textContent = `Return on the money you put in since ${$("#startLbl").textContent}, in each stock's own currency. ${BENCH} measured from its first price on ${$("#startLbl").textContent}. Buying more doesn't count as a gain.`;
+  const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
+  const fmt = (t) => new Date(t * 1000).toLocaleString(undefined, span < 20 ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
   charts.cmp?.destroy();
   charts.cmp = new Chart($("#cmpChart"), {
     type: "line",
-    data: { labels: d.labels.map(fmtLabel), datasets: ds },
+    data: { labels: d.keys.map(fmt), datasets: series.map((s) => ({ label: s.label, data: d[s.key], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" ? 2 : 2.5, tension: 0.15, spanGaps: true })) },
     options: {
       maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${pctMode ? pct(c.raw) : money(c.raw, c.dataset.yAxisID === "y1" ? d.B : d.benchCur)}` } } },
-      scales: pctMode
-        ? { x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } }, y: { ticks: { callback: (v) => v + "%" } } }
-        : { x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } },
-            y: { position: "left", title: { display: true, text: `${name} (${d.benchCur})` }, ticks: { callback: (v) => money(v, d.benchCur) } },
-            y1: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: `Portfolio (${d.B})` }, ticks: { callback: (v) => money(v, d.B) } } },
+      plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line" } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
+      scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0, callback(v) { return this.getLabelForValue(v).split(", ").slice(0, 2).join(", "); } }, grid: { display: false } },
+                y: { ticks: { callback: (v) => v + "%" } } },
     },
   });
 }
 
-$("#bench").value = cmp.bench;
-$("#bench").onchange = (e) => { cmp.bench = e.target.value; localStorage.setItem("bench", cmp.bench); renderCompare(); };
-$("#cmpRanges").addEventListener("click", (e) => {
-  const b = e.target.closest("button"); if (!b) return;
-  cmp.range = b.dataset.r;
-  document.querySelectorAll("#cmpRanges button").forEach((x) => x.classList.toggle("active", x === b));
-  renderCompare();
-});
-$("#cmpModes").addEventListener("click", (e) => {
-  const b = e.target.closest("button"); if (!b) return;
-  cmp.mode = b.dataset.m;
-  document.querySelectorAll("#cmpModes button").forEach((x) => x.classList.toggle("active", x === b));
-  drawCompare();
-});
+$("#startLbl").textContent = new Date(START + "T12:00").toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
 
 (async () => {
   chartDefaults();
