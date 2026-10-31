@@ -168,7 +168,7 @@ def candidate(symbol):
     """Latest target per analyst firm since TARGETS_SINCE vs today's price, plus % off year high, 1-week return,
     and the same snapshot at the open on 1 Jan of HIST_YEARS (targets from 1 Sep of the year before to 1 Jan).
     Yahoo chart prices are split-adjusted, so targets are adjusted for later splits too."""
-    res = qsummary(symbol, "upgradeDowngradeHistory,price")
+    res = qsummary(symbol, "upgradeDowngradeHistory,price,earningsTrend")
     if not res:
         return None
     hist = (res.get("upgradeDowngradeHistory") or {}).get("history") or []
@@ -206,10 +206,22 @@ def candidate(symbol):
                    "ret": (price / jan - 1) * 100 if jan else None}
     pr = res.get("price") or {}
     return {
-        "symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency,
+        "fwd": next12(res), "symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency,
         "price": price, "target": target, "_splits": splits, "n": len(now), "upside": (target / price - 1) * 100,
         "offHigh": (price / max(high, price) - 1) * 100, "week": (price / wk[-1] - 1) * 100 if wk else None, "past": past,
     }
+
+
+def next12(res):
+    """Consensus revenue and EPS for the next 12 months: this and next fiscal year's estimates, time-weighted."""
+    tr = {t.get("period"): t for t in (res.get("earningsTrend") or {}).get("trend") or []}
+    y0, y1 = tr.get("0y"), tr.get("+1y")
+    if not (y0 and y1 and y0.get("endDate")):
+        return None
+    w = min(max((ts_of(y0["endDate"]) - time.time()) / (365 * 86400), 0), 1)
+    est = lambda k: [((t.get(k) or {}).get("avg") or {}).get("raw") for t in (y0, y1)]  # noqa: E731
+    blend = lambda a: w * a[0] + (1 - w) * a[1] if None not in a else None  # noqa: E731
+    return {"rev": blend(est("revenueEstimate")), "eps": blend(est("earningsEstimate"))}
 
 
 def _prod(xs):

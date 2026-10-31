@@ -646,38 +646,38 @@ $("#shareBtn").onclick = async () => {
 async function loadSuggest() {
   const b = $("#sgBucket").value, tb = $("#sgTable tbody");
   localStorage.setItem("sgBucket", b);
-  tb.innerHTML = `<tr><td colspan="13" class="muted">Loading…</td></tr>`; $("#sgNote").textContent = "";
+  tb.innerHTML = `<tr><td colspan="14" class="muted">Loading…</td></tr>`; $("#sgNote").textContent = "";
   try {
     const d = await api("/api/suggest?bucket=" + b);
     if ($("#sgBucket").value !== b) return;
     const ys = [...d.years].sort(), sep = ' class="num grp"';
     const lbl = (y) => `1 Jan ${String(y).slice(2)}`;
     $("#sgTable thead").innerHTML = `<tr><th rowspan="2">Stock</th><th rowspan="2" class="num">Upside</th><th rowspan="2" class="num">Off year high</th><th rowspan="2" class="num">1 week</th>
-      <th colspan="${ys.length + 1}"${sep}>Price</th><th colspan="${ys.length + 1}"${sep}>Avg target</th><th colspan="${ys.length + 1}"${sep}>Revenue / EPS (last 12 months)</th></tr>
-      <tr>${[0, 1, 2].map(() => ys.map((y, i) => `<th${i ? ' class="num"' : sep}>${lbl(y)}</th>`).join("") + `<th class="num">Today</th>`).join("")}</tr>`;
-    const cell = (v, sub, cur, first) => `<td${first ? sep : ' class="num"'}>${v == null ? "–" : money(v, cur)}${sub ? `<div class="small">${sub}</div>` : ""}</td>`;
-    const chg = (a, b) => a != null && b != null ? `<span class="${cls(b / a - 1)}">${pct((b / a - 1) * 100)}</span>` : "";
+      <th colspan="${ys.length + 1}"${sep}>Price</th><th colspan="${ys.length + 1}"${sep}>Avg target</th><th colspan="${ys.length + 2}"${sep}>Revenue / EPS (12 months)</th></tr>
+      <tr>${[0, 1, 2].map((g) => ys.map((y, i) => `<th${i ? ' class="num"' : sep}>${lbl(y)}</th>`).join("") + `<th class="num">Today</th>` + (g === 2 ? `<th class="num" title="Analyst consensus for the next 12 months">1Y fwd</th>` : "")).join("")}</tr>`;
+    const up = (a, b) => a != null && b != null ? cls(b - a) : "";
+    const cell = (v, prev, cur, first) => `<td${first ? sep : ' class="num"'}><span class="${up(prev, v)}">${v == null ? "–" : money(v, cur)}</span></td>`;
     tb.innerHTML = d.top.map((r) => {
       const pts = [...ys.map((y) => r.past[y] || {}), { price: r.price, target: r.target, n: r.n }];
-      const prices = pts.map((p, i) => cell(p.price, i ? chg(pts[i - 1].price, p.price) : "", r.currency, !i)).join("");
+      const prices = pts.map((p, i) => cell(p.price, pts[i - 1]?.price, r.currency, !i)).join("");
       const tgts = pts.map((p, i) => p.target == null && p.price != null
         ? `<td${i ? ' class="num"' : sep}>–<div class="small muted">only ${p.n} analysts</div></td>`
-        : cell(p.target, i ? chg(pts[i - 1].target, p.target) : "", r.currency, !i)).join("");
-      const fs = [...ys.map((y) => r.fund?.[y] || {}), r.fund?.now || {}];
-      const big = (v) => v == null ? "–" : Math.abs(v) >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : "$" + (v / 1e6).toFixed(0) + "M";
-      const gch = (a, b) => a != null && b != null && a > 0 ? " " + chg(a, b) : "";
-      const fwd = fs.map((f, i) => `<td${i ? ' class="num"' : sep}${f.end ? ` title="12 months to ${esc(f.end)}"` : ""}>
-        <div>${big(f.rev)}<span class="small">${i ? gch(fs[i - 1].rev, f.rev) : ""}</span></div>
-        <div class="small muted">${f.eps == null ? "–" : (f.eps < 0 ? "-$" : "$") + Math.abs(f.eps).toFixed(2)}${i ? gch(fs[i - 1].eps, f.eps) : ""}</div></td>`).join("");
+        : cell(p.target, pts[i - 1]?.target, r.currency, !i)).join("");
+      const fs = [...ys.map((y) => r.fund?.[y] || {}), r.fund?.now || {}, { ...r.fwd, end: "fwd" }];
+      const big = (v) => v == null ? "–" : (v < 0 ? "-$" : "$") + (Math.abs(v) >= 1e9 ? (Math.abs(v) / 1e9).toFixed(1) + "B" : (Math.abs(v) / 1e6).toFixed(0) + "M");
+      const eps = (v) => v == null ? "–" : (v < 0 ? "-$" : "$") + Math.abs(v).toFixed(2);
+      const fwd = fs.map((f, i) => `<td${i ? ' class="num"' : sep}${f.end ? ` title="${f.end === "fwd" ? "Analyst consensus, next 12 months" : "12 months to " + esc(f.end)}"` : ""}>
+        <div class="${up(fs[i - 1]?.rev, f.rev)}">${big(f.rev)}</div>
+        <div class="small ${up(fs[i - 1]?.eps, f.eps) || "muted"}">${eps(f.eps)}</div></td>`).join("");
       return `<tr>
       <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${esc(r.name)}</div></td>
       <td class="num"><span class="pill ${cls(r.upside)}">${pct(r.upside)}</span></td>
       <td class="num ${cls(r.offHigh)}">${pct(r.offHigh)}</td>
       <td class="num ${cls(r.week)}">${pct(r.week)}</td>${prices}${tgts}${fwd}</tr>`;
-    }).join("") || `<tr><td colspan="13" class="muted">No stocks qualify right now.</td></tr>`;
-    $("#sgNote").textContent = `Average of each analyst's latest target since ${fmtDay(d.since)} (min ${d.min} analysts) · ${d.qualified} of ${d.checked} stocks qualify · 1 Jan: open on the first trading day, and targets set from 1 Sep to 1 Jan · Revenue (top) and diluted EPS (bottom) from SEC filings, as reported by each date`;
+    }).join("") || `<tr><td colspan="14" class="muted">No stocks qualify right now.</td></tr>`;
+    $("#sgNote").textContent = `Average of each analyst's latest target since ${fmtDay(d.since)} (min ${d.min} analysts) · ${d.qualified} of ${d.checked} stocks qualify · 1 Jan: open on the first trading day, and targets set from 1 Sep to 1 Jan · Revenue (top) and diluted EPS (bottom) from SEC filings, as reported by each date; 1Y fwd: analyst consensus`;
   } catch (e) {
-    tb.innerHTML = `<tr><td colspan="13" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="14" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`;
   }
 }
 $("#sgBucket").value = localStorage.getItem("sgBucket") || "ai";
