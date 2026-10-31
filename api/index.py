@@ -73,7 +73,7 @@ def history(symbol, rng, start=None):
     if start:
         period1 = int(time.mktime(time.strptime(start, "%Y-%m-%d"))) - 86400
         days = (time.time() - period1) / 86400
-        interval = "30m" if days < 55 else "1h" if days < 700 else "1d"
+        interval = "5m" if days < 55 else "1h" if days < 700 else "1d"
     else:
         interval = {"1d": "5m", "5d": "30m", "1mo": "1d", "6mo": "1d", "ytd": "1d", "1y": "1d", "5y": "1wk", "max": "1mo"}.get(rng, "1d")
     res, meta, currency, scale = chart(symbol, rng, interval, ttl=120, period1=period1)

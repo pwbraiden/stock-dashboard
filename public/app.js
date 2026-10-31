@@ -8,6 +8,7 @@ const state = {
   base: localStorage.getItem("base") || "EUR",
   sort: { k: "valueBase", dir: -1 },
   selected: null, editId: null,
+  hidden: JSON.parse(localStorage.getItem("hiddenLines") || '{"me":true}'),
   names: { me: "Me", gf: "Girlfriend", ...JSON.parse(localStorage.getItem("names") || "{}") },
 };
 const charts = {};
@@ -25,6 +26,10 @@ const pct = (v) => v == null || isNaN(v) ? "–" : (v > 0 ? "+" : "") + v.toFixe
 const cls = (v) => v > 0 ? "up" : v < 0 ? "down" : "";
 const num = (v) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(v);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const p2 = (n) => String(n).padStart(2, "0");
+const localDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
+const localWhen = (t) => { const d = new Date(t * 1000); return `${localDay(t)}T${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+const lotWhen = (l) => `${l.date || ""}T${l.time || "00:00"}`;
 const ownerOf = (l) => (l.owner === "gf" ? "gf" : "me");
 
 const SAMPLE = [
@@ -44,7 +49,7 @@ function loadLots() {
   $("#sampleBanner").classList.toggle("hidden", !state.lots.some((l) => l.sample));
 }
 function cleanLot(b) {
-  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || ""), owner: ownerOf(b) };
+  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || ""), time: /^\d\d:\d\d$/.test(b.time || "") ? b.time : "", owner: ownerOf(b) };
   if (!lot.symbol || !(lot.shares > 0) || !(lot.price >= 0)) throw new Error("Please enter a ticker, shares and price");
   return lot;
 }
@@ -143,12 +148,12 @@ function renderLots() {
   $("#dTitle").innerHTML = `${esc(r.symbol)} <span class="muted" style="font-weight:400">${esc(r.name)} · ${esc(state.names[o])}</span> &nbsp;<span>${money(r.price, r.cur)}</span> <span class="${cls(r.dayPct)} small">${pct(r.dayPct)} today</span>`;
   const tb = $("#lots tbody");
   tb.innerHTML = "";
-  const sorted = [...r.lots].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const sorted = [...r.lots].sort((a, b) => lotWhen(a).localeCompare(lotWhen(b)));
   for (const l of sorted) {
     const cost = l.shares * l.price, val = r.price != null ? l.shares * r.price : null;
     const g = val != null ? val - cost : null, p = g != null && cost ? (g / cost) * 100 : null;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(l.date || "–")}</td><td class="num">${num(l.shares)}</td><td class="num">${money(l.price, r.cur)}</td>
+    tr.innerHTML = `<td>${esc(l.date || "–")}${l.time ? ` <span class="muted">${esc(l.time)}</span>` : ""}</td><td class="num">${num(l.shares)}</td><td class="num">${money(l.price, r.cur)}</td>
       <td class="num">${money(cost, r.cur)}</td><td class="num">${money(val, r.cur)}</td>
       <td class="num ${cls(g)}">${signed(g, r.cur)}</td><td class="num"><span class="pill ${cls(p)}">${pct(p)}</span></td>
       <td class="num"><button class="icon" data-edit="${l.id}" title="Edit">&#9998;</button><button class="icon" data-del="${l.id}" title="Delete">&#x2715;</button></td>`;
@@ -183,7 +188,9 @@ function openDialog(lot = null, symbol = "", owner = null) {
   $("#fSymbol").value = lot ? lot.symbol : symbol;
   $("#fShares").value = lot ? lot.shares : "";
   $("#fPrice").value = lot ? lot.price : "";
-  $("#fDate").value = lot ? lot.date : new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  $("#fDate").value = lot ? lot.date : localDay(now / 1000);
+  $("#fTime").value = lot ? lot.time || "" : now.toTimeString().slice(0, 5);
   $("#fInfo").textContent = ""; $("#fCur").textContent = "";
   $("#acList").classList.add("hidden");
   dlg.showModal();
@@ -236,7 +243,7 @@ $("#cancelBtn").onclick = () => dlg.close();
 $("#lotForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   let lot;
-  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value, owner: $("#fOwner").value });
+  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value, time: $("#fTime").value, owner: $("#fOwner").value });
   localStorage.setItem("lastOwner", lot.owner); }
   catch (err) { $("#fInfo").innerHTML = `<span class="down">${err.message}</span>`; return; }
   if (state.editId) state.lots = state.lots.map((l) => (l.id === state.editId ? { ...lot, id: l.id } : l));
@@ -297,7 +304,7 @@ $("#importFile").onchange = async (e) => {
 };
 // ---- Return since START: me vs girlfriend vs QQQ ----
 const cmp = { seq: 0, data: null };
-const localDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
 function ffill(points, keys) {
   const out = []; let j = 0, last = null;
   for (const k of keys) { while (j < points.length && points[j][0] <= k) last = points[j++][1]; out.push(last); }
@@ -321,9 +328,9 @@ async function renderCompare() {
   const line = (o) => {
     const lots = state.lots.filter((l) => ownerOf(l) === o);
     return keys.map((t, i) => {
-      const day = localDay(t); let v = 0, c = 0;
+      const when = localWhen(t); let v = 0, c = 0;
       for (const l of lots) {
-        if (l.date && l.date > day) continue;
+        if (l.date && lotWhen(l) > when) continue;
         const p = px[l.symbol][i], f = fxOf(l.symbol);
         const basis = l.date && l.date >= START ? l.price : firstPx[l.symbol];
         if (p == null || f == null || basis == null) continue;
@@ -345,7 +352,8 @@ function drawCompare() {
     { key: "gf", label: state.names.gf, color: COLORS.gf },
     { key: "bench", label: BENCH, color: COLORS.bench },
   ].filter((s) => d[s.key].some((x) => x != null));
-  $("#cmpSummary").innerHTML = series.map((s) => { const r = last(d[s.key]);
+  const shown = series.filter((s) => !state.hidden[s.key]);
+  $("#cmpSummary").innerHTML = shown.map((s) => { const r = last(d[s.key]);
     return `<span><span class="dot" style="background:${s.color}"></span>${esc(s.label)}<b class="${cls(r)}">${pct(r)}</b></span>`; }).join("");
   $("#cmpNote").textContent = `Return on the money you put in since ${$("#startLbl").textContent}, in each stock's own currency. ${BENCH} measured from its first price on ${$("#startLbl").textContent}. Buying more doesn't count as a gain.`;
   const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
@@ -353,10 +361,11 @@ function drawCompare() {
   charts.cmp?.destroy();
   charts.cmp = new Chart($("#cmpChart"), {
     type: "line",
-    data: { labels: d.keys.map(fmt), datasets: series.map((s) => ({ label: s.label, data: d[s.key], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" ? 2 : 2.5, tension: 0.15, spanGaps: true })) },
+    data: { labels: d.keys.map(fmt), datasets: series.map((s) => ({ hidden: !!state.hidden[s.key], label: s.label, data: d[s.key], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" ? 2 : 2.5, tension: 0.15, spanGaps: true })) },
     options: {
       maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line" } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
+      plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line" },
+        onClick: (_, item) => { const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
       scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0, callback(v) { return this.getLabelForValue(v).split(", ").slice(0, 2).join(", "); } }, grid: { display: false } },
                 y: { ticks: { callback: (v) => v + "%" } } },
     },
