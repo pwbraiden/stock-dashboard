@@ -510,8 +510,8 @@ function whatIfRecovery(d, rows, total) {
     if (mv == null) missing.push(r.symbol); else pm += (r.valueBase / total) * mv;
     return { r, peak, ip, mv, dd: peak ? r.price / Math.max(peak, r.price) - 1 : null };
   });
-  const head = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">High since ${esc(fromLbl)}</th><th class="num">Drawdown</th><th class="num">Price now</th><th class="num">Implied price</th><th class="num">Move</th></tr>`;
-  const body = info.map(({ r, peak, ip, mv, dd }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+  const head = `<tr><th>Stock</th><th class="num">High since ${esc(fromLbl)}</th><th class="num">Drawdown</th><th class="num">Price now</th><th class="num">Implied price</th><th class="num">Move</th></tr>`;
+  const body = info.map(({ r, peak, ip, mv, dd }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td>
     <td class="num">${money(peak, r.cur)}</td><td class="num ${cls(dd)}">${dd != null ? pct(dd * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
     <td class="num"><b>${money(ip, r.cur)}</b></td><td class="num ${cls(mv)}">${mv != null ? pct(mv * 100) : "–"}</td></tr>`).join("");
   return { pm, missing, head, body, cols: 7 };
@@ -550,8 +550,8 @@ function whatIfTargets(d, rows, total) {
     if (mv == null) missing.push(r.symbol); else pm += (r.valueBase / total) * mv;
     return { r, a, mine, t, tp, mv };
   });
-  const head = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Price now</th><th class="num">Consensus</th><th>Use</th><th class="num">Target</th><th class="num">Move</th></tr>`;
-  const body = info.map(({ r, a, mine, t, tp, mv }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+  const head = `<tr><th>Stock</th><th class="num">Price now</th><th class="num">Consensus</th><th>Use</th><th class="num">Target</th><th class="num">Move</th></tr>`;
+  const body = info.map(({ r, a, mine, t, tp, mv }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td>
       <td class="num">${money(r.price, r.cur)}</td>
       <td class="num">${a ? `<span title="Range ${money(a.low, r.cur)}–${money(a.high, r.cur)}">${money(a.mean, r.cur)}</span><div class="small muted">${a.n} analysts</div>` : '<span class="muted">none</span>'}</td>
       <td><select data-src="${esc(r.symbol)}"><option value="consensus"${mine ? "" : " selected"}>Consensus</option><option value="mine"${mine ? " selected" : ""}>My target</option></select></td>
@@ -563,11 +563,11 @@ function whatIfTargets(d, rows, total) {
 function whatIfBeta(d, rows, total, q) {
   if (!q.imp) return null;
   const m = q.imp / d.bLast - 1;
-  const head = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Beta vs QQQ</th><th class="num">Implied move</th><th class="num">Price now</th><th class="num">Implied price</th></tr>`;
+  const head = `<tr><th>Stock</th><th class="num">Beta vs QQQ</th><th class="num">Implied move</th><th class="num">Price now</th><th class="num">Implied price</th></tr>`;
   let pm = 0, wb = 0, missing = [];
   for (const r of rows) { const b = betaOf(r.symbol); if (b == null) { missing.push(r.symbol); continue; } pm += (r.valueBase / total) * b * m; wb += (r.valueBase / total) * b; }
   const body = rows.map((r) => { const b = betaOf(r.symbol), sm = b != null ? b * m : null;
-      return `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+      return `<tr><td><div class="sym">${esc(r.symbol)}</div></td>
         <td class="num"><input type="number" step="0.01" data-beta="${esc(r.symbol)}" value="${b != null ? b.toFixed(2) : ""}" title="${betaOverride[r.symbol] != null ? "Your value" : "Measured from daily prices since 1 Jan 2023"}">${betaOverride[r.symbol] != null ? ' <button class="icon" data-reset="' + esc(r.symbol) + '" title="Use measured beta">↺</button>' : ""}</td>
         <td class="num ${cls(sm)}">${sm != null ? pct(sm * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
         <td class="num"><b>${sm != null && r.price != null ? money(r.price * (1 + sm), r.cur) : "–"}</b></td></tr>`; }).join("");
