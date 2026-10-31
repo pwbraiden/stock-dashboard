@@ -642,11 +642,33 @@ $("#shareBtn").onclick = async () => {
   setTimeout(() => (btn.textContent = "Share"), 2500);
 };
 
+// ---- Suggestions: top 5 per bucket by upside to recent analyst targets ----
+async function loadSuggest() {
+  const b = $("#sgBucket").value, tb = $("#sgTable tbody");
+  localStorage.setItem("sgBucket", b);
+  tb.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`; $("#sgNote").textContent = "";
+  try {
+    const d = await api("/api/suggest?bucket=" + b);
+    if ($("#sgBucket").value !== b) return;
+    tb.innerHTML = d.top.map((r) => `<tr>
+      <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${esc(r.name)}</div></td>
+      <td class="num">${money(r.price, r.currency)}</td>
+      <td class="num">${money(r.target, r.currency)}<div class="small muted">${r.n} analysts</div></td>
+      <td class="num"><span class="pill ${cls(r.upside)}">${pct(r.upside)}</span></td>
+      <td class="num ${cls(r.offHigh)}">${pct(r.offHigh)}</td>
+      <td class="num ${cls(r.week)}">${pct(r.week)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No stocks qualify right now.</td></tr>`;
+    $("#sgNote").textContent = `Average of each analyst's latest target since ${fmtDay(d.since)} (min ${d.min} analysts) · ${d.qualified} of ${d.checked} stocks qualify`;
+  } catch (e) { tb.innerHTML = `<tr><td colspan="6" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`; }
+}
+$("#sgBucket").value = localStorage.getItem("sgBucket") || "ai";
+$("#sgBucket").onchange = loadSuggest;
+
 (async () => {
   chartDefaults();
   loadLots();
   await readShared();
   renderAll();
+  loadSuggest();
   await refresh();
   setInterval(() => refresh(), 60000);
 })();

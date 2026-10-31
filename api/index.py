@@ -113,23 +113,28 @@ def yahoo_auth(force=False):
     return opener, c
 
 
+def qsummary(symbol, modules):
+    for attempt in (0, 1):
+        opener, c = yahoo_auth(force=attempt == 1)
+        url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=%s&crumb=%s" % (
+            urllib.parse.quote(symbol), modules, urllib.parse.quote(c))
+        try:
+            with opener.open(urllib.request.Request(url, headers=UA), timeout=10) as r:
+                return json.load(r)["quoteSummary"]["result"][0]
+        except Exception:  # noqa: BLE001
+            if attempt:
+                return None
+
+
 def targets(symbol):
     """Analyst price targets (mean/median/high/low) from Yahoo financialData."""
     key = "targets:" + symbol
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < 6 * 3600:
         return hit[1]
-    for attempt in (0, 1):
-        opener, c = yahoo_auth(force=attempt == 1)
-        url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=financialData,price&crumb=%s" % (
-            urllib.parse.quote(symbol), urllib.parse.quote(c))
-        try:
-            with opener.open(urllib.request.Request(url, headers=UA), timeout=10) as r:
-                res = json.load(r)["quoteSummary"]["result"][0]
-            break
-        except Exception:  # noqa: BLE001
-            if attempt:
-                return None
+    res = qsummary(symbol, "financialData,price")
+    if res is None:
+        return None
     fd, pr = res.get("financialData", {}), res.get("price", {})
     raw = lambda k: (fd.get(k) or {}).get("raw")  # noqa: E731
     out = None
@@ -139,6 +144,67 @@ def targets(symbol):
                "currency": pr.get("currency")}
     _cache[key] = (time.time(), out)
     return out
+
+
+BUCKETS = {
+    "ai": "NVDA AMD AVGO TSM MU MRVL ANET VRT DELL PLTR QCOM INTC CRWV ORCL MSFT GOOGL META AMZN LRCX AMAT KLAC CEG VST COHR CLS SMCI NBIS ALAB ARM ASML",
+    "software": "CRM NOW ADBE INTU WDAY SNOW DDOG CRWD PANW ZS NET MDB TEAM HUBS SHOP FTNT ADSK TTD APP U OKTA DOCU GTLB IOT S CDNS SNPS",
+    "financial": "JPM BAC WFC C GS MS SCHW BLK AXP V MA COF PYPL HOOD SOFI KKR BX APO SPGI MCO ICE CME PNC USB TFC ARES COIN AFRM NU",
+    "industrials": "GE CAT HON RTX LMT BA UNP UPS ETN NOC WM URI PWR CARR JCI FDX CSX NSC GEV TDG CMI HWM ODFL XYL JBHT CHRW SAIA AAL KTOS AVAV BLDR DAL UAL BWXT MAS",
+    "healthcare": "LLY UNH JNJ ABBV MRK PFE TMO ABT DHR ISRG AMGN GILD VRTX REGN BMY MDT SYK BSX CVS CI ELV HCA ZTS MRNA BIIB DXCM IDXX HUM NVO AZN",
+}
+TARGETS_SINCE = "2026-09-01"
+MIN_TARGETS = 10
+
+
+def candidate(symbol):
+    """Latest target per analyst firm since TARGETS_SINCE, plus % off year high and 1-week return."""
+    since = time.mktime(time.strptime(TARGETS_SINCE, "%Y-%m-%d"))
+    res = qsummary(symbol, "upgradeDowngradeHistory,price")
+    if not res:
+        return None
+    latest = {}
+    for h in (res.get("upgradeDowngradeHistory") or {}).get("history") or []:
+        if h.get("epochGradeDate", 0) >= since and h.get("currentPriceTarget") and h["firm"] not in latest:
+            latest[h["firm"]] = h["currentPriceTarget"]  # history is newest first
+    if len(latest) < MIN_TARGETS:
+        return {"symbol": symbol, "n": len(latest)}
+    year_start = time.mktime((time.localtime().tm_year, 1, 1, 0, 0, 0, 0, 0, -1))
+    ch, meta, currency, scale = chart(symbol, interval="1d", ttl=3600, period1=int(year_start))
+    q = ch.get("indicators", {}).get("quote", [{}])[0]
+    pts = [(t, c * scale) for t, c in zip(ch.get("timestamp") or [], q.get("close") or []) if c is not None]
+    high = max([h * scale for h in q.get("high") or [] if h is not None] or [None])
+    price = (meta.get("regularMarketPrice") or 0) * scale or pts[-1][1]
+    wk = [c for t, c in pts if t <= time.time() - 7 * 86400]
+    target = sum(latest.values()) / len(latest)
+    pr = res.get("price") or {}
+    return {
+        "symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency,
+        "price": price, "target": target, "n": len(latest), "upside": (target / price - 1) * 100,
+        "offHigh": (price / max(high, price) - 1) * 100 if high else None,
+        "week": (price / wk[-1] - 1) * 100 if wk else None,
+    }
+
+
+def suggest(bucket):
+    key = "suggest:" + bucket
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    syms = BUCKETS[bucket].split()
+    with ThreadPoolExecutor(12) as ex:
+        rows = [r for r in ex.map(lambda s: _safe(candidate, s), syms) if r and r.get("target")]
+    rows.sort(key=lambda r: -r["upside"])
+    out = {"bucket": bucket, "since": TARGETS_SINCE, "min": MIN_TARGETS, "checked": len(syms), "qualified": len(rows), "top": rows[:5]}
+    _cache[key] = (time.time(), out)
+    return out
+
+
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def route(path):
@@ -156,6 +222,9 @@ def route(path):
             syms = [s for s in qs.get("symbols", [""])[0].split(",") if s][:30]
             with ThreadPoolExecutor(8) as ex:
                 return 200, dict(zip(syms, ex.map(targets, syms)))
+        if u.path == "/api/suggest":
+            b = qs.get("bucket", ["ai"])[0]
+            return (200, suggest(b)) if b in BUCKETS else (400, {"error": "unknown bucket"})
         if u.path == "/api/search":
             return 200, search(qs.get("q", [""])[0])
     except Exception as e:  # noqa: BLE001
