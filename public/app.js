@@ -1,6 +1,6 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const START = "2026-10-27";
+const START = "2026-10-05";
 const OWNERS = ["me", "gf"];
 const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b" };
 const BENCH = "QQQ";
@@ -312,12 +312,8 @@ function ffill(points, keys) {
   return out;
 }
 
-// Chart starts at the girlfriend's first order (falls back to START).
 function chartStart() {
-  const dated = state.lots.filter((l) => l.date && l.date >= START);
-  const pick = (ls) => ls.reduce((a, l) => (!a || lotWhen(l) < lotWhen(a) ? l : a), null);
-  const first = pick(dated.filter((l) => ownerOf(l) === "gf")) || pick(dated);
-  return first ? { when: lotWhen(first), lot: first } : { when: START + "T00:00", lot: null };
+  return { when: START + "T00:00", lot: null };
 }
 
 async function renderCompare() {
@@ -330,7 +326,7 @@ async function renderCompare() {
   if (!bench || !bench.points.length) { $("#cmpNote").textContent = `Couldn't load ${BENCH} prices.`; return; }
   const H = {}; syms.forEach((s, i) => (H[s] = hs[i]?.points || []));
   const keys = bench.points.map((p) => p[0]).filter((t) => localWhen(t) >= start.when);
-  if (!keys.length) { $("#cmpNote").textContent = `No ${BENCH} prices yet after the first order.`; return; }
+  if (!keys.length) { $("#cmpNote").textContent = `No ${BENCH} prices yet after the chart start.`; return; }
   const px = {}; syms.forEach((s) => (px[s] = ffill(H[s], keys)));
   const bpx = ffill(bench.points, keys);
   const fxOf = (s) => { const c = state.quotes[s]?.currency || hs[syms.indexOf(s)]?.currency || "USD"; return state.fx[c] ?? (c === state.base ? 1 : null); };
@@ -433,7 +429,7 @@ async function loadBetas(syms) {
 const betaOf = (s) => betaOverride[s] ?? betas[s] ?? null;
 
 const wiMode = () => (["recovery", "targets"].includes(wiState.mode) ? wiState.mode : "beta");
-const qqqSrc = () => (/^\d+$/.test(wiState.qsrc || "") ? "banks" : wiState.qsrc || "price");
+const qqqSrc = () => (/^\d+$/.test(wiState.qsrc || "") ? "banks" : wiState.qsrc === "banks" ? "banks" : "price");
 const myQqq = () => (+wiState.price > 0 ? +wiState.price : null);
 const targetWhen = () => (wiState.date ? `${wiState.date}T${wiState.time || "22:00"}` : null);
 const fmtDay = (day) => new Date(day + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -444,10 +440,7 @@ function qqqTarget(d) {
   const src = qqqSrc(), now = d.bLast;
   let imp = null, how = "", label = `${BENCH} target`, note = "";
   if (src === "price") { imp = myQqq(); how = "your price"; }
-  else if (src === "rule") {
-    const peak = peaks[`${BENCH}|${recFrom()}`]; imp = recoverTo(now, peak); label = `${BENCH} implied`;
-    how = `takes back ${recPct()}% of drop from high ${money(peak, "USD")}`;
-  } else {
+  else {
     const avg = bankAvg(), used = banksUsed(), old = BANKS.filter((b) => !used.includes(b));
     imp = avg * SPX_TO_QQQ; label = `${BENCH} (bank avg)`;
     how = `average of ${used.length} banks' S&P 500 targets ${Math.round(avg).toLocaleString()}; S&P 8,000 = ${BENCH} $760`;
@@ -462,7 +455,7 @@ function qqqTarget(d) {
 function whatIf(d) {
   const mode = wiMode(), src = qqqSrc();
   $$("#wiMode button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
-  $$(".whatif [data-for]").forEach((el) => el.classList.toggle("hidden", el.dataset.for === "price" ? src !== "price" : !(mode === "recovery" || src === "rule")));
+  $$(".whatif [data-for]").forEach((el) => el.classList.toggle("hidden", el.dataset.for === "price" ? src !== "price" : mode !== "recovery"));
   $("#wiQqq").value = src;
   $("#wiNow").textContent = d.bLast ? `(now ${money(d.bLast, "USD")})` : "";
   if (!d.bLast) return null;
@@ -581,7 +574,6 @@ const fillWi = () => { for (const id in WI) $("#" + id).value = wiState[WI[id]] 
 const saveWi = () => localStorage.setItem("whatIf", JSON.stringify(wiState));
 const loadWi = () => {
   const mode = wiMode(), src = qqqSrc(), pk = [];
-  if (src === "rule") pk.push(BENCH);
   if (mode === "recovery") pk.push(...gfSyms());
   return Promise.all([pk.length ? loadPeaks(pk, recFrom()) : null, mode === "targets" ? loadTargets(gfSyms()) : null]);
 };
