@@ -9,7 +9,7 @@ const state = {
   base: localStorage.getItem("base") || "EUR",
   sort: { k: "valueBase", dir: -1 },
   selected: null, editId: null,
-  hidden: JSON.parse(localStorage.getItem("hiddenLines") || '{"me":true}'),
+  hidden: JSON.parse(localStorage.getItem("hiddenLines2") || "{}"),
   names: { me: "Me", gf: "Girlfriend", ...JSON.parse(localStorage.getItem("names") || "{}") },
 };
 const charts = {};
@@ -353,7 +353,7 @@ async function renderCompare() {
   const sd = new Date(start.when);
   $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
     (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
-  await Promise.all([loadBetas(gfSyms()), loadWi()]);
+  await Promise.all([loadBetas(allSyms()), loadWi()]);
   if (seq !== cmp.seq) return;
   cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
   drawCompare();
@@ -391,7 +391,7 @@ function drawCompare() {
         pointRadius: data.map((_, j) => (j === n ? 5 : 0)), proj: true });
     };
     if (wi.benchRet != null) proj("bench", wi.benchLabel || `${BENCH} target`, COLORS.bench, wi.benchRet);
-    if (wi.gfRet != null && !state.hidden.gf) proj("gf", `${state.names.gf} implied`, COLORS.gf, wi.gfRet);
+    for (const o of ["me", "gf"]) if (wi.ret[o] != null && !state.hidden[o]) proj(o, `${state.names[o]} implied`, COLORS[o], wi.ret[o]);
   }
   charts.cmp?.destroy();
   charts.cmp = new Chart($("#cmpChart"), {
@@ -400,7 +400,7 @@ function drawCompare() {
     options: {
       maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
       plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line", filter: (item) => item.datasetIndex < series.length },
-        onClick: (_, item) => { if (item.datasetIndex >= series.length) return; const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
+        onClick: (_, item) => { if (item.datasetIndex >= series.length) return; const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines2", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
       scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0, callback(v) { return this.getLabelForValue(v).split(", ").slice(0, 2).join(", "); } }, grid: { display: false } },
                 y: { ticks: { callback: (v) => v + "%" } } },
     },
@@ -441,18 +441,10 @@ const recoverTo = (now, peak) => (peak == null || now == null ? null : now + (re
 // QQQ target, shared by all methods: own price, drawdown-recovery rule, or a bank's S&P 500 target via beta.
 function qqqTarget(d) {
   const src = qqqSrc(), now = d.bLast;
-  let imp = null, how = "", label = `${BENCH} target`, note = "";
-  if (src === "price") { imp = myQqq(); how = "your price"; }
-  else {
-    const avg = bankAvg(), used = banksUsed(), old = BANKS.filter((b) => !used.includes(b));
-    imp = avg * SPX_TO_QQQ; label = `${BENCH} (bank avg)`;
-    how = `average of ${used.length} banks' S&P 500 targets ${Math.round(avg).toLocaleString()}; S&P 8,000 = ${BENCH} $760`;
-    note = ` Bank average uses year-end 2026 S&P 500 targets given or restated since ${fmtDay(BANK_SINCE)}: ${used.map((b) => `${b[0]} ${b[1].toLocaleString()} (${fmtDay(b[2])})`).join(", ")}.` +
-      (old.length ? ` Left out (no update since then): ${old.map((b) => `${b[0]} ${b[1].toLocaleString()} (${fmtDay(b[2])})`).join(", ")}.` : "") + ` ${BENCH} = S&P 500 × 760/8,000.`;
-  }
-  const line = imp ? `${BENCH} ${money(now, "USD")} → <b>${money(imp, "USD")}</b> = <b class="${cls(imp - now)}">${pct((imp / now - 1) * 100)}</b> <span class="muted">(${how})</span>`
-    : `${BENCH}: <span class="muted">${src === "price" ? "type a QQQ price above" : how}</span>`;
-  return { imp, line, label, note };
+  const imp = src === "price" ? myQqq() : bankAvg() * SPX_TO_QQQ, label = src === "price" ? `${BENCH} target` : `${BENCH} (bank avg)`;
+  const line = imp ? `${BENCH} ${money(now, "USD")} → <b>${money(imp, "USD")}</b> = <b class="${cls(imp - now)}">${pct((imp / now - 1) * 100)}</b>`
+    : `${BENCH}: <span class="muted">type a QQQ price above</span>`;
+  return { imp, line, label };
 }
 
 function whatIf(d) {
@@ -462,20 +454,28 @@ function whatIf(d) {
   $("#wiQqq").value = src;
   $("#wiNow").textContent = d.bLast ? `(now ${money(d.bLast, "USD")})` : "";
   if (!d.bLast) return null;
-  const rows = (state.rows.gf || []).filter((r) => r.valueBase != null);
-  const total = rows.reduce((a, r) => a + r.valueBase, 0);
-  const q = qqqTarget(d);
-  const res = mode === "recovery" ? whatIfRecovery(d, rows, total) : mode === "targets" ? whatIfTargets(d, rows, total) : whatIfBeta(d, rows, total, q);
-  const gfLast = [...d.gf].reverse().find((x) => x != null);
-  const gfRet = res && gfLast != null && rows.length ? ((1 + gfLast / 100) * (1 + res.pm) - 1) * 100 : null;
-  const B = state.base, name = esc(state.names.gf);
-  $("#wiOut").innerHTML = q.line + "<br>" + (!rows.length ? `${name} has no stocks yet.` : res
-    ? `${name}'s portfolio${res.extra || ""} → implied <b class="${cls(res.pm)}">${pct(res.pm * 100)}</b> = ${signed(total * res.pm, B)}, value <b>${money(total * (1 + res.pm), B)}</b>, return since start <b class="${cls(gfRet)}">${pct(gfRet)}</b>`
-    : `${name}'s portfolio: <span class="muted">set a QQQ target above to use the beta method</span>`);
-  $("#wiTable").classList.toggle("hidden", !rows.length || !res);
-  $("#wiNote").textContent = (res?.note || "") + q.note;
-  if (!q.imp && !res) return null;
-  return { benchRet: q.imp && d.b0 ? (q.imp / d.b0 - 1) * 100 : null, benchLabel: q.label, gfRet, when: targetWhen() };
+  const q = qqqTarget(d), B = state.base, method = mode === "recovery" ? whatIfRecovery : mode === "targets" ? whatIfTargets : whatIfBeta;
+  const out = [q.line], body = [], missing = new Set(), ret = {};
+  let head = "";
+  for (const o of ["me", "gf"]) {
+    const rows = (state.rows[o] || []).filter((r) => r.valueBase != null);
+    if (!rows.length) continue;
+    const total = rows.reduce((a, r) => a + r.valueBase, 0), name = `<span class="dot" style="background:${COLORS[o]}"></span>${esc(state.names[o])}`;
+    const res = method(d, rows, total, q);
+    if (!res) { out.push(`${name}: <span class="muted">set a QQQ target above</span>`); continue; }
+    const last = [...d[o]].reverse().find((x) => x != null);
+    ret[o] = last != null ? ((1 + last / 100) * (1 + res.pm) - 1) * 100 : null;
+    head = res.head; res.missing.forEach((m) => missing.add(m));
+    body.push(`<tr class="grp"><td colspan="${res.cols}">${name}</td></tr>` + res.body);
+    out.push(`${name}${res.extra || ""} → <b class="${cls(res.pm)}">${pct(res.pm * 100)}</b> = ${signed(total * res.pm, B)}, value <b>${money(total * (1 + res.pm), B)}</b>, since start <b class="${cls(ret[o])}">${pct(ret[o])}</b>`);
+  }
+  $("#wiOut").innerHTML = out.join("<br>");
+  $("#wiTable").classList.toggle("hidden", !body.length);
+  $("#wiTable thead").innerHTML = head;
+  if (!$("#wiTable").contains(document.activeElement)) $("#wiTable tbody").innerHTML = body.join("");
+  $("#wiNote").textContent = missing.size ? `No data for ${[...missing].join(", ")}, so left out.` : "";
+  if (!q.imp && !Object.keys(ret).length) return null;
+  return { benchRet: q.imp && d.b0 ? (q.imp / d.b0 - 1) * 100 : null, benchLabel: q.label, ret, when: targetWhen() };
 }
 
 // Drawdown recovery: each stock takes back X% of its drop from its high since a date.
@@ -492,7 +492,7 @@ async function loadPeaks(syms, from) {
     peaks[`${s}|${from}`] = ps.length ? Math.max(...ps) : null;
   });
 }
-const gfSyms = () => [...new Set(state.lots.filter((l) => ownerOf(l) === "gf").map((l) => l.symbol))];
+const allSyms = () => [...new Set(state.lots.map((l) => l.symbol))];
 
 function whatIfRecovery(d, rows, total) {
   const from = recFrom(), fromLbl = fmtDay(from);
@@ -502,12 +502,11 @@ function whatIfRecovery(d, rows, total) {
     if (mv == null) missing.push(r.symbol); else pm += (r.valueBase / total) * mv;
     return { r, peak, ip, mv, dd: peak ? r.price / Math.max(peak, r.price) - 1 : null };
   });
-  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">High since ${esc(fromLbl)}</th><th class="num">Drawdown</th><th class="num">Price now</th><th class="num">Implied price</th><th class="num">Move</th></tr>`;
-  $("#wiTable tbody").innerHTML = info.map(({ r, peak, ip, mv, dd }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+  const head = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">High since ${esc(fromLbl)}</th><th class="num">Drawdown</th><th class="num">Price now</th><th class="num">Implied price</th><th class="num">Move</th></tr>`;
+  const body = info.map(({ r, peak, ip, mv, dd }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
     <td class="num">${money(peak, r.cur)}</td><td class="num ${cls(dd)}">${dd != null ? pct(dd * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
     <td class="num"><b>${money(ip, r.cur)}</b></td><td class="num ${cls(mv)}">${mv != null ? pct(mv * 100) : "–"}</td></tr>`).join("");
-  return { pm, extra: ` (each stock takes back ${recPct()}% of its drop)`,
-    note: `High = highest price since ${fromLbl}. A stock already at its high stays where it is.` + (missing.length ? ` No price history for ${missing.join(", ")}, so it's left out.` : "") };
+  return { pm, missing, head, body, cols: 7 };
 }
 
 // Price targets: each stock -> analyst consensus or own target; QQQ -> own price or bank S&P 500 target.
@@ -543,33 +542,28 @@ function whatIfTargets(d, rows, total) {
     if (mv == null) missing.push(r.symbol); else pm += (r.valueBase / total) * mv;
     return { r, a, mine, t, tp, mv };
   });
-  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Price now</th><th class="num">Consensus</th><th>Use</th><th class="num">Target</th><th class="num">Move</th></tr>`;
-  if (!$("#wiTable").contains(document.activeElement)) {
-    $("#wiTable tbody").innerHTML = info.map(({ r, a, mine, t, tp, mv }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+  const head = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Price now</th><th class="num">Consensus</th><th>Use</th><th class="num">Target</th><th class="num">Move</th></tr>`;
+  const body = info.map(({ r, a, mine, t, tp, mv }) => `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
       <td class="num">${money(r.price, r.cur)}</td>
       <td class="num">${a ? `<span title="Range ${money(a.low, r.cur)}–${money(a.high, r.cur)}">${money(a.mean, r.cur)}</span><div class="small muted">${a.n} analysts</div>` : '<span class="muted">none</span>'}</td>
       <td><select data-src="${esc(r.symbol)}"><option value="consensus"${mine ? "" : " selected"}>Consensus</option><option value="mine"${mine ? " selected" : ""}>My target</option></select></td>
       <td class="num">${mine ? `<input class="tgt" type="number" step="any" min="0" data-tgt="${esc(r.symbol)}" value="${t.price ?? ""}">` : `<b>${money(tp, r.cur)}</b>`}</td>
       <td class="num ${cls(mv)}">${mv != null ? pct(mv * 100) : "–"}</td></tr>`).join("");
-  }
-  return { pm, note: `Consensus = average analyst price target (usually a 12-month view), from Yahoo Finance.` + (missing.length ? ` No target for ${missing.join(", ")}, so it's left out.` : "") };
+  return { pm, missing, head, body, cols: 7 };
 }
 
 function whatIfBeta(d, rows, total, q) {
   if (!q.imp) return null;
-  const m = q.imp / d.bLast - 1, tb = $("#wiTable tbody"), editing = $("#wiTable").contains(document.activeElement);
-  $("#wiTable thead").innerHTML = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Beta vs QQQ</th><th class="num">Implied move</th><th class="num">Price now</th><th class="num">Implied price</th></tr>`;
+  const m = q.imp / d.bLast - 1;
+  const head = `<tr><th>Stock</th><th class="num">Weight</th><th class="num">Beta vs QQQ</th><th class="num">Implied move</th><th class="num">Price now</th><th class="num">Implied price</th></tr>`;
   let pm = 0, wb = 0, missing = [];
   for (const r of rows) { const b = betaOf(r.symbol); if (b == null) { missing.push(r.symbol); continue; } pm += (r.valueBase / total) * b * m; wb += (r.valueBase / total) * b; }
-  if (!editing) {
-    tb.innerHTML = rows.map((r) => { const b = betaOf(r.symbol), sm = b != null ? b * m : null;
+  const body = rows.map((r) => { const b = betaOf(r.symbol), sm = b != null ? b * m : null;
       return `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
         <td class="num"><input type="number" step="0.01" data-beta="${esc(r.symbol)}" value="${b != null ? b.toFixed(2) : ""}" title="${betaOverride[r.symbol] != null ? "Your value" : "Measured from daily prices since 1 Jan 2023"}">${betaOverride[r.symbol] != null ? ' <button class="icon" data-reset="' + esc(r.symbol) + '" title="Use measured beta">↺</button>' : ""}</td>
         <td class="num ${cls(sm)}">${sm != null ? pct(sm * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
         <td class="num"><b>${sm != null && r.price != null ? money(r.price * (1 + sm), r.cur) : "–"}</b></td></tr>`; }).join("");
-  }
-  return { pm, extra: ` (beta ${wb.toFixed(2)})`, note: `Beta = how much a stock has moved for each 1% move in ${BENCH}, measured from daily prices since 1 Jan 2023 (or since listing, if later). You can type your own.` +
-    (missing.length ? ` No beta for ${missing.join(", ")}, so it's left out.` : "") };
+  return { pm, missing, head, body, cols: 6, extra: ` (beta ${wb.toFixed(2)})` };
 }
 
 const WI = { wiPrice: "price", wiDate: "date", wiTime: "time", wiRec: "rec", wiPeak: "peakFrom" };
@@ -577,8 +571,8 @@ const fillWi = () => { for (const id in WI) $("#" + id).value = wiState[WI[id]] 
 const saveWi = () => localStorage.setItem("whatIf", JSON.stringify(wiState));
 const loadWi = () => {
   const mode = wiMode(), src = qqqSrc(), pk = [];
-  if (mode === "recovery") pk.push(...gfSyms());
-  return Promise.all([pk.length ? loadPeaks(pk, recFrom()) : null, mode === "targets" ? loadTargets(gfSyms()) : null]);
+  if (mode === "recovery") pk.push(...allSyms());
+  return Promise.all([pk.length ? loadPeaks(pk, recFrom()) : null, mode === "targets" ? loadTargets(allSyms()) : null]);
 };
 async function redrawWi() {
   drawCompare(); await loadWi(); drawCompare();
