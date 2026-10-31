@@ -294,14 +294,17 @@ $("#exportBtn").onclick = (e) => {
 };
 $("#importBtn").onclick = (e) => { e.preventDefault(); $("#importFile").click(); };
 $("#importFile").onchange = async (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  if (!confirm("Replace all current holdings with the imported file?")) return;
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   try {
-    state.lots = JSON.parse(await f.text()).map((l) => ({ ...cleanLot(l), id: newId() }));
+    const key = (l) => [l.symbol, l.shares, l.price, l.date, l.time, ownerOf(l)].join("|");
+    const have = new Set(state.lots.map(key));
+    const add = JSON.parse(await f.text()).map(cleanLot).filter((l) => !have.has(key(l)) && have.add(key(l)));
+    const skipped = add.length ? "" : " (all were already there)";
+    if (!confirm(`Add ${add.length} purchase${add.length === 1 ? "" : "s"} to your holdings?${skipped}`) || !add.length) return;
+    state.lots = [...state.lots, ...add.map((l) => ({ ...l, id: newId() }))];
     saveLots(); loadLots(); await refresh();
   }
   catch (err) { alert("Import failed: " + err.message); }
-  e.target.value = "";
 };
 // ---- Return since START: me vs girlfriend vs QQQ ----
 const cmp = { seq: 0, data: null };
