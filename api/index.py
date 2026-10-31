@@ -168,7 +168,7 @@ def candidate(symbol):
     """Latest target per analyst firm since TARGETS_SINCE vs today's price, plus % off year high, 1-week return,
     and the same snapshot at the open on 1 Jan of HIST_YEARS (targets from 1 Sep of the year before to 1 Jan).
     Yahoo chart prices are split-adjusted, so targets are adjusted for later splits too."""
-    res = qsummary(symbol, "upgradeDowngradeHistory,price")
+    res = qsummary(symbol, "upgradeDowngradeHistory,price,earningsTrend")
     if not res:
         return None
     hist = (res.get("upgradeDowngradeHistory") or {}).get("history") or []
@@ -204,10 +204,13 @@ def candidate(symbol):
         t = avg(d) if len(d) >= MIN_TARGETS else None
         past[y] = {"price": jan, "target": t, "n": len(d), "upside": (t / jan - 1) * 100 if t and jan else None,
                    "ret": (price / jan - 1) * 100 if jan else None}
+    nxt = next((t for t in (res.get("earningsTrend") or {}).get("trend") or [] if t.get("period") == "+1y"), {})
+    growth = lambda k: ((nxt.get(k) or {}).get("growth") or {}).get("raw")  # noqa: E731
+    fwd = {"fy": (nxt.get("endDate") or "")[:4], "rev": growth("revenueEstimate"), "eps": growth("earningsEstimate")}
     pr = res.get("price") or {}
     return {
         "symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency,
-        "price": price, "target": target, "n": len(now), "upside": (target / price - 1) * 100,
+        "price": price, "target": target, "fwd": fwd, "n": len(now), "upside": (target / price - 1) * 100,
         "offHigh": (price / max(high, price) - 1) * 100, "week": (price / wk[-1] - 1) * 100 if wk else None, "past": past,
     }
 
