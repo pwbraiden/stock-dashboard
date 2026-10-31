@@ -353,7 +353,9 @@ async function renderCompare() {
   const sd = new Date(start.when);
   $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
     (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
-  cmp.data = { keys, me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
+  await loadBetas([...new Set(state.lots.filter((l) => ownerOf(l) === "gf").map((l) => l.symbol))]);
+  if (seq !== cmp.seq) return;
+  cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
   drawCompare();
 }
 
@@ -371,20 +373,110 @@ function drawCompare() {
   $("#cmpNote").textContent = `Return on the money put in, in each stock's own currency. ${BENCH} measured from its first price after the start. Buying more doesn't count as a gain.`;
   const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
   const fmt = (t) => new Date(t * 1000).toLocaleString(undefined, span < 20 ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
+  const labels = d.keys.map(fmt);
+  const datasets = series.map((s) => ({ hidden: !!state.hidden[s.key], label: s.label, data: [...d[s.key]], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" ? 2 : 2.5, tension: 0.15, spanGaps: true }));
+  const wi = whatIf(d);
+  if (wi) {
+    // Extend the x-axis to the target, spaced like the trading-hours data so far.
+    const t0 = d.keys[d.keys.length - 1], tTarget = wi.when ? new Date(wi.when).getTime() / 1000 : null;
+    const perDay = d.keys.length / Math.max(1, span);
+    const steps = tTarget && tTarget > t0 ? Math.min(Math.max(8, Math.round(perDay * (tTarget - t0) / 86400 * 5 / 7)), d.keys.length * 2) : 8;
+    for (let k = 1; k <= steps; k++) labels.push(k === steps ? "Target" + (tTarget ? ": " + fmt(tTarget) : "") : tTarget ? fmt(t0 + (tTarget - t0) * k / steps) : "");
+    const n = labels.length - 1;
+    datasets.forEach((ds) => ds.data.push(...Array(steps).fill(null)));
+    const proj = (key, label, color, end) => {
+      const i = d[key].length - 1 - [...d[key]].reverse().findIndex((x) => x != null);
+      const data = Array(n + 1).fill(null); data[i] = d[key][i]; data[n] = end;
+      datasets.push({ label, data, borderColor: color, backgroundColor: color, borderDash: [6, 4], borderWidth: 2, spanGaps: true, tension: 0,
+        pointRadius: data.map((_, j) => (j === n ? 5 : 0)), proj: true });
+    };
+    proj("bench", `${BENCH} target`, COLORS.bench, wi.benchRet);
+    if (wi.gfRet != null && !state.hidden.gf) proj("gf", `${state.names.gf} implied`, COLORS.gf, wi.gfRet);
+  }
   charts.cmp?.destroy();
   charts.cmp = new Chart($("#cmpChart"), {
     type: "line",
-    data: { labels: d.keys.map(fmt), datasets: series.map((s) => ({ hidden: !!state.hidden[s.key], label: s.label, data: d[s.key], borderColor: s.color, backgroundColor: s.color, pointRadius: 0, borderWidth: s.key === "bench" ? 2 : 2.5, tension: 0.15, spanGaps: true })) },
+    data: { labels, datasets },
     options: {
       maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line" },
-        onClick: (_, item) => { const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
+      plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line", filter: (item) => item.datasetIndex < series.length },
+        onClick: (_, item) => { if (item.datasetIndex >= series.length) return; const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
       scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0, callback(v) { return this.getLabelForValue(v).split(", ").slice(0, 2).join(", "); } }, grid: { display: false } },
                 y: { ticks: { callback: (v) => v + "%" } } },
     },
   });
 }
 
+// ---- What-if: QQQ target -> implied move for girlfriend's portfolio via beta ----
+const betas = {};
+const betaOverride = JSON.parse(localStorage.getItem("betaOverride") || "{}");
+const wiState = JSON.parse(localStorage.getItem("whatIf") || "{}");
+async function loadBetas(syms) {
+  const need = syms.filter((s) => !(s in betas));
+  if (!need.length) return;
+  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&range=1y`).catch(() => null);
+  const [q, ...hs] = await Promise.all([BENCH, ...need].map(get));
+  const rets = (pts) => { const m = {}; for (let i = 1; i < pts.length; i++) m[localDay(pts[i][0])] = pts[i][1] / pts[i - 1][1] - 1; return m; };
+  const qr = q ? rets(q.points) : {};
+  need.forEach((s, i) => {
+    if (s === BENCH) { betas[s] = 1; return; }
+    const sr = hs[i] ? rets(hs[i].points) : {};
+    const days = Object.keys(sr).filter((k) => k in qr);
+    if (days.length < 30) { betas[s] = null; return; }
+    const mx = days.reduce((a, k) => a + qr[k], 0) / days.length, my = days.reduce((a, k) => a + sr[k], 0) / days.length;
+    let cov = 0, v = 0; for (const k of days) { cov += (qr[k] - mx) * (sr[k] - my); v += (qr[k] - mx) ** 2; }
+    betas[s] = v ? cov / v : null;
+  });
+}
+const betaOf = (s) => betaOverride[s] ?? betas[s] ?? null;
+
+function whatIf(d) {
+  $("#wiNow").textContent = d.bLast ? `(now ${money(d.bLast, "USD")})` : "";
+  const target = +wiState.price;
+  const tb = $("#wiTable tbody"), editing = $("#wiTable").contains(document.activeElement);
+  if (!(target > 0) || !d.bLast) {
+    $("#wiOut").innerHTML = ""; $("#wiNote").textContent = ""; $("#wiTable").classList.add("hidden");
+    return null;
+  }
+  const m = target / d.bLast - 1;
+  const rows = (state.rows.gf || []).filter((r) => r.valueBase != null);
+  const total = rows.reduce((a, r) => a + r.valueBase, 0);
+  let pm = 0, wb = 0, missing = [];
+  for (const r of rows) { const b = betaOf(r.symbol); if (b == null) { missing.push(r.symbol); continue; } pm += (r.valueBase / total) * b * m; wb += (r.valueBase / total) * b; }
+  const gfLast = [...d.gf].reverse().find((x) => x != null);
+  const gfRet = gfLast != null && rows.length ? ((1 + gfLast / 100) * (1 + pm) - 1) * 100 : null;
+  const B = state.base, name = esc(state.names.gf);
+  $("#wiOut").innerHTML = `${BENCH} ${money(d.bLast, "USD")} → <b>${money(target, "USD")}</b> = <b class="${cls(m)}">${pct(m * 100)}</b> move` +
+    (rows.length ? `<br>${name}'s portfolio (beta ${wb.toFixed(2)}) → implied <b class="${cls(pm)}">${pct(pm * 100)}</b> = ${signed(total * pm, B)}, value <b>${money(total * (1 + pm), B)}</b>, return since start <b class="${cls(gfRet)}">${pct(gfRet)}</b>` : `<br>${name} has no stocks yet.`);
+  if (!editing) {
+    tb.innerHTML = rows.map((r) => { const b = betaOf(r.symbol), sm = b != null ? b * m : null;
+      return `<tr><td><div class="sym">${esc(r.symbol)}</div></td><td class="num">${((r.valueBase / total) * 100).toFixed(1)}%</td>
+        <td class="num"><input type="number" step="0.01" data-beta="${esc(r.symbol)}" value="${b != null ? b.toFixed(2) : ""}" title="${betaOverride[r.symbol] != null ? "Your value" : "Measured from the last year of daily prices"}">${betaOverride[r.symbol] != null ? ' <button class="icon" data-reset="' + esc(r.symbol) + '" title="Use measured beta">↺</button>' : ""}</td>
+        <td class="num ${cls(sm)}">${sm != null ? pct(sm * 100) : "–"}</td><td class="num">${money(r.price, r.cur)}</td>
+        <td class="num"><b>${sm != null && r.price != null ? money(r.price * (1 + sm), r.cur) : "–"}</b></td></tr>`; }).join("");
+  }
+  $("#wiTable").classList.toggle("hidden", !rows.length);
+  $("#wiNote").textContent = `Beta = how much a stock has moved for each 1% move in ${BENCH}, measured from the last year of daily prices. You can type your own.` +
+    (missing.length ? ` No beta for ${missing.join(", ")}, so it's left out.` : "");
+  return { benchRet: (target / d.b0 - 1) * 100, gfRet, when: wiState.date ? `${wiState.date}T${wiState.time || "22:00"}` : null };
+}
+
+$("#wiPrice").value = wiState.price || ""; $("#wiDate").value = wiState.date || ""; $("#wiTime").value = wiState.time || "";
+["wiPrice", "wiDate", "wiTime"].forEach((id) => $("#" + id).addEventListener("input", () => {
+  Object.assign(wiState, { price: $("#wiPrice").value, date: $("#wiDate").value, time: $("#wiTime").value });
+  localStorage.setItem("whatIf", JSON.stringify(wiState)); drawCompare();
+}));
+$("#wiClear").onclick = () => { ["wiPrice", "wiDate", "wiTime"].forEach((id) => ($("#" + id).value = "")); for (const k in wiState) delete wiState[k]; localStorage.removeItem("whatIf"); drawCompare(); };
+$("#wiTable").addEventListener("change", (e) => {
+  const s = e.target.dataset.beta; if (!s) return;
+  const v = parseFloat(e.target.value);
+  if (isNaN(v)) delete betaOverride[s]; else betaOverride[s] = v;
+  localStorage.setItem("betaOverride", JSON.stringify(betaOverride)); e.target.blur(); drawCompare();
+});
+$("#wiTable").addEventListener("click", (e) => {
+  const s = e.target.dataset?.reset; if (!s) return;
+  delete betaOverride[s]; localStorage.setItem("betaOverride", JSON.stringify(betaOverride)); drawCompare();
+});
 
 (async () => {
   chartDefaults();
