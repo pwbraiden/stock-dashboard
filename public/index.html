@@ -34,6 +34,27 @@
     <div class="card"><div class="label">Today</div><div class="value" id="tDay">–</div><div class="sub" id="tDayPct"></div></div>
   </section>
 
+  <section class="panel" id="compare">
+    <div class="panel-head">
+      <h2>My portfolio vs
+        <select id="bench">
+          <option value="QQQ">QQQ (Nasdaq-100)</option>
+          <option value="SPY">SPY (S&amp;P 500)</option>
+          <option value="URTH">URTH (MSCI World)</option>
+          <option value="^GDAXI">DAX</option>
+        </select>
+      </h2>
+      <div class="ranges">
+        <span id="cmpModes"><button data-m="pct" class="active">% return</button><button data-m="value">Value</button></span>
+        &nbsp;
+        <span id="cmpRanges"><button data-r="1mo">1M</button><button data-r="6mo">6M</button><button data-r="ytd">YTD</button><button data-r="1y" class="active">1Y</button><button data-r="5y">5Y</button><button data-r="max">Max</button></span>
+      </div>
+    </div>
+    <div id="cmpSummary" class="cmp-summary"></div>
+    <div class="chart-box tall"><canvas id="cmpChart"></canvas></div>
+    <p class="muted small" id="cmpNote"></p>
+  </section>
+
   <section class="panel">
     <div class="panel-head">
       <h2>Holdings</h2>

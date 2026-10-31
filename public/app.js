@@ -232,7 +232,11 @@ function renderAll() { compute(); renderSummary(); renderTable(); renderCharts()
 
 async function refresh(withHistory = false) {
   $("#refresh").disabled = true;
-  try { await loadQuotes(); renderAll(); if (withHistory && state.selected) await renderHistory(); }
+  try {
+    await loadQuotes(); renderAll();
+    if (withHistory || cmp.base !== state.base) renderCompare();
+    if (withHistory && state.selected) await renderHistory();
+  }
   catch (e) { $("#updated").textContent = "Price update failed: " + e.message; }
   finally { $("#refresh").disabled = false; }
 }
@@ -322,7 +326,7 @@ $("#lots").addEventListener("click", async (e) => {
 // ---- Controls ----
 $("#clearSample").onclick = () => {
   state.lots = state.lots.filter((l) => !l.sample);
-  saveLots(); loadLots(); selectStock(null); renderAll(); refresh();
+  saveLots(); loadLots(); selectStock(null); renderAll(); refresh(true);
 };
 $("#addBtn").onclick = () => openDialog();
 $("#refresh").onclick = () => refresh(true);
@@ -351,11 +355,124 @@ $("#importFile").onchange = async (e) => {
   if (!confirm("Replace all current holdings with the imported file?")) return;
   try {
     state.lots = JSON.parse(await f.text()).map((l) => ({ ...cleanLot(l), id: newId() }));
-    saveLots(); loadLots(); await refresh();
+    saveLots(); loadLots(); await refresh(true);
   }
   catch (err) { alert("Import failed: " + err.message); }
   e.target.value = "";
 };
+
+
+// ---- Portfolio vs benchmark ----
+const cmp = { range: "1y", mode: "pct", bench: localStorage.getItem("bench") || "QQQ", seq: 0, data: null, base: null };
+const dayKey = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+function ffill(points, keys) {
+  const pts = points.map((p) => [dayKey(p[0]), p[1]]);
+  const out = []; let j = 0, last = null;
+  for (const k of keys) { while (j < pts.length && pts[j][0] <= k) last = pts[j++][1]; out.push(last); }
+  return out;
+}
+
+async function renderCompare() {
+  const seq = ++cmp.seq, B = state.base;
+  cmp.base = B;
+  const lots = state.lots, syms = [...new Set(lots.map((l) => l.symbol))];
+  const get = (s) => api(`/api/history?symbol=${encodeURIComponent(s)}&range=${cmp.range}`).catch(() => null);
+  const [bench, ...hs] = await Promise.all([cmp.bench, ...syms].map(get));
+  if (seq !== cmp.seq) return;
+  if (!bench || !bench.points.length) { $("#cmpNote").textContent = `Couldn't load ${cmp.bench} prices.`; return; }
+  const curOf = { [cmp.bench]: bench.currency };
+  syms.forEach((s, i) => (curOf[s] = hs[i]?.currency || state.quotes[s]?.currency || "USD"));
+  const curs = [...new Set(Object.values(curOf).filter((c) => c !== B))];
+  const fxh = await Promise.all(curs.map((c) => get(`${c}${B}=X`)));
+  if (seq !== cmp.seq) return;
+  const keys = [...new Set(bench.points.map((p) => dayKey(p[0])))];
+  const ones = keys.map(() => 1);
+  const fx = { [B]: ones };
+  curs.forEach((c, i) => (fx[c] = fxh[i]?.points.length ? ffill(fxh[i].points, keys) : keys.map(() => state.fx[c] ?? null)));
+  const px = {}; syms.forEach((s, i) => (px[s] = hs[i] ? ffill(hs[i].points, keys) : []));
+  const benchPx = ffill(bench.points, keys);
+  const held = (s, k) => lots.reduce((a, l) => a + (l.symbol === s && (!l.date || l.date <= k) ? l.shares : 0), 0);
+  const val = (s, i, k) => { const n = held(s, k), p = px[s][i], f = fx[curOf[s]][i]; return n && p != null && f != null ? n * p * f : null; };
+
+  const value = [], twr = []; let cum = 1;
+  keys.forEach((k, i) => {
+    let v = 0, any = false;
+    for (const s of syms) { const x = val(s, i, k); if (x != null) { v += x; any = true; } }
+    value.push(any ? v : null);
+    if (i > 0 && any) {
+      const kp = keys[i - 1]; let v0 = 0, g = 0;
+      for (const s of syms) {
+        const n = held(s, kp), p0 = px[s][i - 1], p1 = px[s][i], f0 = fx[curOf[s]][i - 1], f1 = fx[curOf[s]][i];
+        if (n && p0 != null && p1 != null && f0 != null && f1 != null) { v0 += n * p0 * f0; g += n * (p1 * f1 - p0 * f0); }
+      }
+      if (v0 > 0) cum *= 1 + g / v0;
+    }
+    twr.push(any ? (cum - 1) * 100 : null);
+  });
+  let i0 = value.findIndex((v) => v != null);
+  if (i0 < 0) i0 = 0;
+  const bfx = fx[curOf[cmp.bench]];
+  const benchBase = benchPx.map((p, i) => (p != null && bfx[i] != null ? p * bfx[i] : null));
+  const b0 = benchBase[i0];
+  cmp.data = {
+    labels: keys.slice(i0), value: value.slice(i0), twr: twr.slice(i0), benchPx: benchPx.slice(i0),
+    benchPct: benchBase.slice(i0).map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)),
+    benchCur: bench.currency, converted: bench.currency !== B, B, late: i0 > 0 ? keys[i0] : null,
+  };
+  drawCompare();
+}
+
+function drawCompare() {
+  const d = cmp.data; if (!d) return;
+  const name = cmp.bench.replace("^GDAXI", "DAX");
+  const last = (a) => [...a].reverse().find((x) => x != null);
+  const pR = last(d.twr), bR = last(d.benchPct);
+  $("#cmpSummary").innerHTML = state.lots.length ? `
+    <span><span class="dot" style="background:#4f8cff"></span>My portfolio<b class="${cls(pR)}">${pct(pR)}</b></span>
+    <span><span class="dot" style="background:#f59e0b"></span>${name}<b class="${cls(bR)}">${pct(bR)}</b></span>
+    ${pR != null && bR != null ? `<span class="muted">You're ${pR >= bR ? "ahead of" : "behind"} ${name} by <b class="${cls(pR - bR)}">${Math.abs(pR - bR).toFixed(2)} pts</b></span>` : ""}` : "";
+  $("#cmpNote").textContent = (d.late ? `Starts ${d.late}, when your first purchase in this period was made. ` : "") +
+    (cmp.mode === "pct"
+      ? `Both lines in ${d.B}${d.converted ? ` (${name} converted from ${d.benchCur})` : ""}. Your line is the return on your stocks only; buying more doesn't move it.`
+      : `Your portfolio value in ${d.B} (right axis) includes new purchases; ${name} price in ${d.benchCur} (left axis).`);
+  const fmtLabel = (k) => new Date(k).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" });
+  const pctMode = cmp.mode === "pct";
+  const ds = pctMode
+    ? [{ label: "My portfolio", data: d.twr, borderColor: "#4f8cff", yAxisID: "y" },
+       { label: name, data: d.benchPct, borderColor: "#f59e0b", yAxisID: "y" }]
+    : [{ label: "My portfolio", data: d.value, borderColor: "#4f8cff", yAxisID: "y1" },
+       { label: `${name} price`, data: d.benchPx, borderColor: "#f59e0b", yAxisID: "y" }];
+  ds.forEach((x) => Object.assign(x, { pointRadius: 0, borderWidth: 2, tension: 0.15, spanGaps: true }));
+  charts.cmp?.destroy();
+  charts.cmp = new Chart($("#cmpChart"), {
+    type: "line",
+    data: { labels: d.labels.map(fmtLabel), datasets: ds },
+    options: {
+      maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${pctMode ? pct(c.raw) : money(c.raw, c.dataset.yAxisID === "y1" ? d.B : d.benchCur)}` } } },
+      scales: pctMode
+        ? { x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } }, y: { ticks: { callback: (v) => v + "%" } } }
+        : { x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } },
+            y: { position: "left", title: { display: true, text: `${name} (${d.benchCur})` }, ticks: { callback: (v) => money(v, d.benchCur) } },
+            y1: { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: `Portfolio (${d.B})` }, ticks: { callback: (v) => money(v, d.B) } } },
+    },
+  });
+}
+
+$("#bench").value = cmp.bench;
+$("#bench").onchange = (e) => { cmp.bench = e.target.value; localStorage.setItem("bench", cmp.bench); renderCompare(); };
+$("#cmpRanges").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  cmp.range = b.dataset.r;
+  document.querySelectorAll("#cmpRanges button").forEach((x) => x.classList.toggle("active", x === b));
+  renderCompare();
+});
+$("#cmpModes").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  cmp.mode = b.dataset.m;
+  document.querySelectorAll("#cmpModes button").forEach((x) => x.classList.toggle("active", x === b));
+  drawCompare();
+});
 
 (async () => {
   chartDefaults();
