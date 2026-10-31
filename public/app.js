@@ -6,7 +6,7 @@ const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b" };
 const BENCH = "QQQ";
 const state = {
   lots: [], quotes: {}, fx: {}, rows: {}, about: {},
-  base: localStorage.getItem("base") || "EUR",
+  base: "USD",
   sort: { k: "valueBase", dir: -1 },
   selected: null, editId: null,
   hidden: JSON.parse(localStorage.getItem("hiddenLines2") || "{}"),
@@ -274,8 +274,6 @@ $("#clearSample").onclick = () => {
 };
 $("#addBtn").onclick = () => openDialog();
 $("#refresh").onclick = () => refresh();
-$("#base").value = state.base;
-$("#base").onchange = (e) => { state.base = e.target.value; localStorage.setItem("base", state.base); refresh(); };
 document.querySelectorAll(".holdings th").forEach((th) => th.onclick = () => {
   const k = th.dataset.k;
   state.sort = { k, dir: state.sort.k === k ? -state.sort.dir : (k === "symbol" ? 1 : -1) };
@@ -355,7 +353,7 @@ async function renderCompare() {
   const b0 = bpx.find((p) => p != null);
   const sd = new Date(start.when);
   $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
-    (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
+    (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : " (market top)");
   await Promise.all([loadBetas(allSyms()), loadWi()]);
   if (seq !== cmp.seq) return;
   cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)) };
