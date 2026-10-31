@@ -646,15 +646,15 @@ $("#shareBtn").onclick = async () => {
 async function loadSuggest() {
   const b = $("#sgBucket").value, tb = $("#sgTable tbody");
   localStorage.setItem("sgBucket", b);
-  tb.innerHTML = `<tr><td colspan="11" class="muted">Loading…</td></tr>`; $("#sgNote").textContent = "";
+  tb.innerHTML = `<tr><td colspan="13" class="muted">Loading…</td></tr>`; $("#sgNote").textContent = "";
   try {
     const d = await api("/api/suggest?bucket=" + b);
     if ($("#sgBucket").value !== b) return;
     const ys = [...d.years].sort(), sep = ' class="num grp"';
     const lbl = (y) => `1 Jan ${String(y).slice(2)}`;
     $("#sgTable thead").innerHTML = `<tr><th rowspan="2">Stock</th><th rowspan="2" class="num">Upside</th><th rowspan="2" class="num">Off year high</th><th rowspan="2" class="num">1 week</th>
-      <th colspan="${ys.length + 1}"${sep}>Price</th><th colspan="${ys.length + 1}"${sep}>Avg target</th><th rowspan="2"${sep} title="Analyst consensus growth, next financial year vs this one">Next FY<br>Rev / EPS</th></tr>
-      <tr>${[0, 1].map(() => ys.map((y, i) => `<th${i ? ' class="num"' : sep}>${lbl(y)}</th>`).join("") + `<th class="num">Today</th>`).join("")}</tr>`;
+      <th colspan="${ys.length + 1}"${sep}>Price</th><th colspan="${ys.length + 1}"${sep}>Avg target</th><th colspan="${ys.length + 1}"${sep}>Revenue / EPS (last 12 months)</th></tr>
+      <tr>${[0, 1, 2].map(() => ys.map((y, i) => `<th${i ? ' class="num"' : sep}>${lbl(y)}</th>`).join("") + `<th class="num">Today</th>`).join("")}</tr>`;
     const cell = (v, sub, cur, first) => `<td${first ? sep : ' class="num"'}>${v == null ? "–" : money(v, cur)}${sub ? `<div class="small">${sub}</div>` : ""}</td>`;
     const chg = (a, b) => a != null && b != null ? `<span class="${cls(b / a - 1)}">${pct((b / a - 1) * 100)}</span>` : "";
     tb.innerHTML = d.top.map((r) => {
@@ -663,17 +663,21 @@ async function loadSuggest() {
       const tgts = pts.map((p, i) => p.target == null && p.price != null
         ? `<td${i ? ' class="num"' : sep}>–<div class="small muted">only ${p.n} analysts</div></td>`
         : cell(p.target, i ? chg(pts[i - 1].target, p.target) : "", r.currency, !i)).join("");
-      const g = (v) => v == null ? "–" : `<span class="${cls(v)}">${pct(v * 100)}</span>`;
-      const fwd = `<td${sep} title="FY${esc(r.fwd?.fy || "")}"><div>${g(r.fwd?.rev)}</div><div class="small">${g(r.fwd?.eps)}</div></td>`;
+      const fs = [...ys.map((y) => r.fund?.[y] || {}), r.fund?.now || {}];
+      const big = (v) => v == null ? "–" : Math.abs(v) >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : "$" + (v / 1e6).toFixed(0) + "M";
+      const gch = (a, b) => a != null && b != null && a > 0 ? " " + chg(a, b) : "";
+      const fwd = fs.map((f, i) => `<td${i ? ' class="num"' : sep}${f.end ? ` title="12 months to ${esc(f.end)}"` : ""}>
+        <div>${big(f.rev)}<span class="small">${i ? gch(fs[i - 1].rev, f.rev) : ""}</span></div>
+        <div class="small muted">${f.eps == null ? "–" : (f.eps < 0 ? "-$" : "$") + Math.abs(f.eps).toFixed(2)}${i ? gch(fs[i - 1].eps, f.eps) : ""}</div></td>`).join("");
       return `<tr>
       <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${esc(r.name)}</div></td>
       <td class="num"><span class="pill ${cls(r.upside)}">${pct(r.upside)}</span></td>
       <td class="num ${cls(r.offHigh)}">${pct(r.offHigh)}</td>
       <td class="num ${cls(r.week)}">${pct(r.week)}</td>${prices}${tgts}${fwd}</tr>`;
-    }).join("") || `<tr><td colspan="11" class="muted">No stocks qualify right now.</td></tr>`;
-    $("#sgNote").textContent = `Average of each analyst's latest target since ${fmtDay(d.since)} (min ${d.min} analysts) · ${d.qualified} of ${d.checked} stocks qualify · 1 Jan: open on the first trading day, and targets set from 1 Sep to 1 Jan · Next FY: consensus revenue / EPS growth`;
+    }).join("") || `<tr><td colspan="13" class="muted">No stocks qualify right now.</td></tr>`;
+    $("#sgNote").textContent = `Average of each analyst's latest target since ${fmtDay(d.since)} (min ${d.min} analysts) · ${d.qualified} of ${d.checked} stocks qualify · 1 Jan: open on the first trading day, and targets set from 1 Sep to 1 Jan · Revenue (top) and diluted EPS (bottom) from SEC filings, as reported by each date`;
   } catch (e) {
-    tb.innerHTML = `<tr><td colspan="11" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="13" class="down">Couldn't load suggestions: ${esc(e.message)}</td></tr>`;
   }
 }
 $("#sgBucket").value = localStorage.getItem("sgBucket") || "ai";

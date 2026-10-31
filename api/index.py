@@ -168,7 +168,7 @@ def candidate(symbol):
     """Latest target per analyst firm since TARGETS_SINCE vs today's price, plus % off year high, 1-week return,
     and the same snapshot at the open on 1 Jan of HIST_YEARS (targets from 1 Sep of the year before to 1 Jan).
     Yahoo chart prices are split-adjusted, so targets are adjusted for later splits too."""
-    res = qsummary(symbol, "upgradeDowngradeHistory,price,earningsTrend")
+    res = qsummary(symbol, "upgradeDowngradeHistory,price")
     if not res:
         return None
     hist = (res.get("upgradeDowngradeHistory") or {}).get("history") or []
@@ -204,13 +204,10 @@ def candidate(symbol):
         t = avg(d) if len(d) >= MIN_TARGETS else None
         past[y] = {"price": jan, "target": t, "n": len(d), "upside": (t / jan - 1) * 100 if t and jan else None,
                    "ret": (price / jan - 1) * 100 if jan else None}
-    nxt = next((t for t in (res.get("earningsTrend") or {}).get("trend") or [] if t.get("period") == "+1y"), {})
-    growth = lambda k: ((nxt.get(k) or {}).get("growth") or {}).get("raw")  # noqa: E731
-    fwd = {"fy": (nxt.get("endDate") or "")[:4], "rev": growth("revenueEstimate"), "eps": growth("earningsEstimate")}
     pr = res.get("price") or {}
     return {
         "symbol": symbol, "name": pr.get("shortName") or pr.get("longName") or symbol, "currency": currency,
-        "price": price, "target": target, "fwd": fwd, "n": len(now), "upside": (target / price - 1) * 100,
+        "price": price, "target": target, "_splits": splits, "n": len(now), "upside": (target / price - 1) * 100,
         "offHigh": (price / max(high, price) - 1) * 100, "week": (price / wk[-1] - 1) * 100 if wk else None, "past": past,
     }
 
@@ -222,6 +219,68 @@ def _prod(xs):
     return p
 
 
+SEC_UA = {"User-Agent": "stock-dashboard sophiewattne@gmail.com"}  # SEC asks for a contact in the UA
+REV_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
+            "RevenueFromContractWithCustomerIncludingAssessedTax")
+
+
+def sec_json(url, ttl):
+    hit = _cache.get(url)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    with urllib.request.urlopen(urllib.request.Request(url, headers=SEC_UA), timeout=15) as r:
+        data = json.load(r)
+    _cache[url] = (time.time(), data)
+    return data
+
+
+def _days(a, b):
+    return (ts_of(b) - ts_of(a)) / 86400
+
+
+def ttm(entries, asof, splits=()):
+    """Sum of the last 4 reported quarters as known at `asof` (Q4 derived from the annual figure), with
+    per-share values adjusted for splits after they were filed. Returns (value, quarter_end) or None."""
+    q, ann = {}, {}
+    for e in sorted((e for e in entries if ts_of(e["filed"]) <= asof), key=lambda e: e["filed"]):
+        d = _days(e["start"], e["end"])
+        v = e["val"] / _prod(x["numerator"] / x["denominator"] for x in splits if x["date"] > ts_of(e["filed"]))
+        if 80 <= d <= 100:
+            q[e["end"]] = (e["start"], v)
+        elif 350 <= d <= 380:
+            ann[e["end"]] = (e["start"], v)
+    for end, (start, v) in ann.items():
+        inside = [k for k, (st, _) in q.items() if st >= start and k <= end]
+        if len(inside) == 3 and not any(abs(_days(k, end)) < 10 for k in q):
+            q[end] = (max(inside), v - sum(q[k][1] for k in inside))
+    ends = sorted(q)[-4:]
+    if len(ends) < 4 or not 250 <= _days(ends[0], ends[-1]) <= 300 or asof - ts_of(ends[-1]) > 200 * 86400:
+        return None
+    return sum(q[k][1] for k in ends), ends[-1]
+
+
+def fundamentals(symbol, splits):
+    """Trailing-12-month revenue and diluted EPS from SEC filings at 1 Jan of HIST_YEARS and today."""
+    ciks = sec_json("https://www.sec.gov/files/company_tickers.json", 7 * 86400)
+    cik = next((v["cik_str"] for v in ciks.values() if v["ticker"] == symbol), None)
+    if not cik:
+        return None
+    g = sec_json("https://data.sec.gov/api/xbrl/companyfacts/CIK%010d.json" % cik, 86400)["facts"].get("us-gaap") or {}
+    unit = lambda tag: next(iter((g.get(tag) or {}).get("units", {}).values()), [])  # noqa: E731
+    eps_entries, seen = [], set()
+    for tag in ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted", "EarningsPerShareBasic"):  # loss quarters often have basic only
+        new = [e for e in unit(tag) if (e.get("start"), e["end"]) not in seen]
+        seen |= {(e.get("start"), e["end"]) for e in new}
+        eps_entries += new
+    out = {}
+    for key, at in [(str(y), ts_of("%d-01-01" % y)) for y in HIST_YEARS] + [("now", time.time())]:
+        revs = [r for r in (ttm(unit(t), at) for t in REV_TAGS) if r]
+        rev = max(revs, key=lambda r: (r[1], r[0])) if revs else None
+        eps = ttm(eps_entries, at, splits)
+        out[key] = {"rev": rev and rev[0], "eps": eps and eps[0], "end": (rev or eps or (None, None))[1]}
+    return out
+
+
 def suggest(bucket):
     key = "suggest:" + bucket
     hit = _cache.get(key)
@@ -231,7 +290,13 @@ def suggest(bucket):
     with ThreadPoolExecutor(12) as ex:
         rows = [r for r in ex.map(lambda s: _safe(candidate, s), syms) if r and r.get("target")]
     rows.sort(key=lambda r: -r["upside"])
-    out = {"bucket": bucket, "since": TARGETS_SINCE, "years": HIST_YEARS, "min": MIN_TARGETS, "checked": len(syms), "qualified": len(rows), "top": rows[:5]}
+    top = rows[:5]
+    with ThreadPoolExecutor(5) as ex:
+        for r, f in zip(top, ex.map(lambda r: _safe(fundamentals, r["symbol"], r["_splits"]), top)):
+            r["fund"] = f
+    for r in rows:
+        r.pop("_splits", None)
+    out = {"bucket": bucket, "since": TARGETS_SINCE, "years": HIST_YEARS, "min": MIN_TARGETS, "checked": len(syms), "qualified": len(rows), "top": top}
     _cache[key] = (time.time(), out)
     return out
 
