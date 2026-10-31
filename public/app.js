@@ -21,7 +21,28 @@ const pct = (v) => v == null || isNaN(v) ? "–" : (v > 0 ? "+" : "") + v.toFixe
 const cls = (v) => v > 0 ? "up" : v < 0 ? "down" : "";
 const num = (v) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(v);
 
-async function loadLots() { state.lots = await api("/api/lots"); }
+const SAMPLE = [
+  { symbol: "AAPL", shares: 10, price: 150, date: "2023-03-15" },
+  { symbol: "AAPL", shares: 5, price: 190, date: "2024-06-10" },
+  { symbol: "MSFT", shares: 8, price: 310, date: "2023-05-02" },
+  { symbol: "NVDA", shares: 20, price: 45, date: "2023-01-20" },
+  { symbol: "SAP.DE", shares: 12, price: 120, date: "2023-09-01" },
+];
+const newId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const saveLots = () => localStorage.setItem("lots", JSON.stringify(state.lots));
+function loadLots() {
+  const raw = localStorage.getItem("lots");
+  if (raw == null) {
+    state.lots = SAMPLE.map((l) => ({ ...l, id: newId(), sample: true }));
+    saveLots();
+  } else state.lots = JSON.parse(raw);
+  $("#sampleBanner").classList.toggle("hidden", !state.lots.some((l) => l.sample));
+}
+function cleanLot(b) {
+  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || "") };
+  if (!lot.symbol || !(lot.shares > 0) || !(lot.price >= 0)) throw new Error("Please enter a ticker, shares and price");
+  return lot;
+}
 
 async function loadQuotes() {
   const syms = [...new Set(state.lots.map((l) => l.symbol))];
@@ -278,13 +299,14 @@ $("#acList").addEventListener("mousedown", (e) => { const li = e.target.closest(
 $("#cancelBtn").onclick = () => dlg.close();
 $("#lotForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const body = JSON.stringify({ symbol: $("#fSymbol").value.trim().toUpperCase(), shares: +$("#fShares").value, price: +$("#fPrice").value, date: $("#fDate").value });
-  try {
-    if (state.editId) await api("/api/lots/" + state.editId, { method: "PUT", body });
-    else await api("/api/lots", { method: "POST", body });
-  } catch (err) { $("#fInfo").innerHTML = `<span class="down">${err.message}</span>`; return; }
+  let lot;
+  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value }); }
+  catch (err) { $("#fInfo").innerHTML = `<span class="down">${err.message}</span>`; return; }
+  if (state.editId) state.lots = state.lots.map((l) => (l.id === state.editId ? { ...lot, id: l.id } : l));
+  else state.lots.push({ ...lot, id: newId() });
+  saveLots(); loadLots();
   dlg.close();
-  await loadLots(); await refresh(true);
+  await refresh(true);
 });
 
 $("#lots").addEventListener("click", async (e) => {
@@ -292,12 +314,16 @@ $("#lots").addEventListener("click", async (e) => {
   if (b.dataset.edit) openDialog(state.lots.find((l) => l.id === b.dataset.edit));
   if (b.dataset.addfor) openDialog(null, b.dataset.addfor);
   if (b.dataset.del && confirm("Delete this purchase?")) {
-    await api("/api/lots/" + b.dataset.del, { method: "DELETE" });
-    await loadLots(); await refresh(true);
+    state.lots = state.lots.filter((l) => l.id !== b.dataset.del);
+    saveLots(); loadLots(); await refresh(true);
   }
 });
 
 // ---- Controls ----
+$("#clearSample").onclick = () => {
+  state.lots = state.lots.filter((l) => !l.sample);
+  saveLots(); loadLots(); selectStock(null); renderAll(); refresh();
+};
 $("#addBtn").onclick = () => openDialog();
 $("#refresh").onclick = () => refresh(true);
 $("#base").value = state.base;
@@ -316,21 +342,24 @@ $("#ranges").addEventListener("click", (e) => {
 $("#exportBtn").onclick = (e) => {
   e.preventDefault();
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(state.lots.map(({ id, ...l }) => l), null, 2)], { type: "application/json" }));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(state.lots.map(({ id, sample, ...l }) => l), null, 2)], { type: "application/json" }));
   a.download = "portfolio.json"; a.click();
 };
 $("#importBtn").onclick = (e) => { e.preventDefault(); $("#importFile").click(); };
 $("#importFile").onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
   if (!confirm("Replace all current holdings with the imported file?")) return;
-  try { await api("/api/lots/import", { method: "POST", body: await f.text() }); await loadLots(); await refresh(); }
+  try {
+    state.lots = JSON.parse(await f.text()).map((l) => ({ ...cleanLot(l), id: newId() }));
+    saveLots(); loadLots(); await refresh();
+  }
   catch (err) { alert("Import failed: " + err.message); }
   e.target.value = "";
 };
 
 (async () => {
   chartDefaults();
-  await loadLots();
+  loadLots();
   renderAll();
   await refresh();
   setInterval(() => refresh(), 60000);

@@ -23,6 +23,10 @@
 </header>
 
 <main>
+  <div id="sampleBanner" class="banner hidden">
+    <span>You're looking at <b>sample stocks</b>. Add your own with <b>+ Add purchase</b>, then</span>
+    <button id="clearSample" class="ghost">Remove sample stocks</button>
+  </div>
   <section class="cards">
     <div class="card"><div class="label">Portfolio value</div><div class="value" id="tValue">–</div></div>
     <div class="card"><div class="label">Total invested</div><div class="value" id="tCost">–</div></div>
@@ -81,7 +85,7 @@
   </section>
 
   <footer class="muted small">
-    Prices from Yahoo Finance, refreshed every 60 s (may be delayed). Totals in other currencies use today's exchange rate.
+    Prices from Yahoo Finance, refreshed every 60 s (may be delayed). Totals in other currencies use today's exchange rate. Your holdings are saved only in this browser.
     <a href="#" id="exportBtn">Export</a> · <a href="#" id="importBtn">Import</a>
     <input type="file" id="importFile" accept="application/json" class="hidden">
   </footer>

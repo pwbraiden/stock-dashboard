@@ -1,3 +1,4 @@
 holdings.json
 holdings.json.tmp
 __pycache__/
+.vercel
