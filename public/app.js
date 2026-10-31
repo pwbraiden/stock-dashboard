@@ -473,7 +473,7 @@ function whatIf(d) {
     ret[o] = last != null ? ((1 + last / 100) * (1 + res.pm) - 1) * 100 : null;
     res.missing.forEach((m) => missing.add(m));
     sumNow += total; sumThen += total * (1 + res.pm);
-    res_rows.push(`<tr><td>${name}${res.extra || ""}</td><td class="num">${money(total, B)}</td><td class="num"><b>${money(total * (1 + res.pm), B)}</b></td>
+    res_rows.push(`<tr><td>${name}${res.extra ? `<div class="small muted">${res.extra.replace(/^\s*\(|\)\s*$/g, "")}</div>` : ""}</td><td class="num">${money(total, B)}</td><td class="num"><b>${money(total * (1 + res.pm), B)}</b></td>
       <td class="num ${cls(res.pm)}">${signed(total * res.pm, B)}</td><td class="num"><span class="pill ${cls(res.pm)}">${pct(res.pm * 100)}</span></td><td class="num ${cls(ret[o])}">${pct(ret[o])}</td></tr>`);
   }
   if (res_rows.length > 1 && sumNow) {
@@ -481,7 +481,7 @@ function whatIf(d) {
     res_rows.push(`<tr class="wi-total"><td>Together</td><td class="num">${money(sumNow, B)}</td><td class="num"><b>${money(sumThen, B)}</b></td>
       <td class="num ${cls(pm)}">${signed(sumThen - sumNow, B)}</td><td class="num"><span class="pill ${cls(pm)}">${pct(pm * 100)}</span></td><td></td></tr>`);
   }
-  if (res_rows.length) out.push(`<div class="table-wrap"><table class="holdings wi-res"><thead><tr><th>Portfolio</th><th class="num">Value today</th><th class="num">If scenario plays out</th><th class="num">Gain / loss</th><th class="num">Move</th><th class="num">Return since start</th></tr></thead><tbody>${res_rows.join("")}</tbody></table></div>`);
+  if (res_rows.length) out.push(`<div class="table-wrap"><table class="holdings wi-res"><thead><tr><th>Portfolio</th><th class="num">Today</th><th class="num">If it plays out</th><th class="num">Gain</th><th class="num">Move</th><th class="num">Since start</th></tr></thead><tbody>${res_rows.join("")}</tbody></table></div>`);
   $("#wiOut").innerHTML = out.join("");
   $("#wiTable").classList.toggle("hidden", !table);
   if (table) {
