@@ -608,9 +608,44 @@ $("#wiTable").addEventListener("click", (e) => {
   delete betaOverride[s]; localStorage.setItem("betaOverride", JSON.stringify(betaOverride)); drawCompare();
 });
 
+// ---- Share link: holdings packed (deflate + base64url) into the URL fragment, never sent to the server ----
+const b64u = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+async function shareLink() {
+  const data = { n: state.names, l: state.lots.filter((l) => !l.sample).map((l) => [l.symbol, l.shares, l.price, l.date || "", l.time || "", ownerOf(l)]) };
+  const json = new TextEncoder().encode(JSON.stringify(data));
+  const code = window.CompressionStream ? "z" + b64u(await pipe(json, new CompressionStream("deflate-raw"))) : "j" + b64u(json);
+  return `${location.origin}${location.pathname}#s=${code}`;
+}
+async function readShared() {
+  const m = location.hash.match(/^#s=([zj])([\w-]+)$/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  try {
+    let bytes = unb64u(m[2]);
+    if (m[1] === "z") bytes = await pipe(bytes, new DecompressionStream("deflate-raw"));
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    const lots = data.l.map(([symbol, shares, price, date, time, owner]) => ({ ...cleanLot({ symbol, shares, price, date, time, owner }), id: newId() }));
+    const mine = state.lots.filter((l) => !l.sample).length;
+    if (mine && !confirm(`Load the shared portfolio (${lots.length} purchases)? It replaces the ${mine} purchase${mine === 1 ? "" : "s"} saved in this browser.`)) return;
+    state.lots = lots; saveLots();
+    if (data.n) { state.names = { ...state.names, ...data.n }; localStorage.setItem("names", JSON.stringify(state.names)); }
+    loadLots();
+  } catch (err) { alert("Couldn't read the shared link: " + err.message); }
+}
+$("#shareBtn").onclick = async () => {
+  const url = await shareLink(), btn = $("#shareBtn");
+  if (navigator.share && matchMedia("(pointer: coarse)").matches) { try { await navigator.share({ title: "Our Portfolio", url }); } catch {} return; }
+  try { await navigator.clipboard.writeText(url); btn.textContent = "Link copied ✓"; }
+  catch { prompt("Copy this link:", url); }
+  setTimeout(() => (btn.textContent = "Share"), 2500);
+};
+
 (async () => {
   chartDefaults();
   loadLots();
+  await readShared();
   renderAll();
   await refresh();
   setInterval(() => refresh(), 60000);
