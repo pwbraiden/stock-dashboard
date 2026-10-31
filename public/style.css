@@ -64,3 +64,4 @@ footer{margin-top:24px;text-align:center}footer a{color:var(--accent)}
 .table-wrap{scrollbar-color:var(--line) transparent}
 dialog select{width:100%;margin-top:4px}
 #stockDialog{width:min(820px,95vw)}
+@media (max-width:520px){.holdings th:nth-child(2),.holdings td:nth-child(2),.holdings th:nth-child(3),.holdings td:nth-child(3){display:none}}
