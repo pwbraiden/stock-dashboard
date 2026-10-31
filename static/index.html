@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Stock Portfolio</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>My Portfolio</h1>
+  <div class="header-actions">
+    <span id="updated" class="muted"></span>
+    <label class="muted">Show totals in
+      <select id="base">
+        <option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option>
+      </select>
+    </label>
+    <button id="refresh" class="ghost" title="Refresh prices">&#x21bb; Refresh</button>
+    <button id="addBtn">+ Add purchase</button>
+  </div>
+</header>
+
+<main>
+  <section class="cards">
+    <div class="card"><div class="label">Portfolio value</div><div class="value" id="tValue">–</div></div>
+    <div class="card"><div class="label">Total invested</div><div class="value" id="tCost">–</div></div>
+    <div class="card"><div class="label">Total gain / loss</div><div class="value" id="tGain">–</div><div class="sub" id="tGainPct"></div></div>
+    <div class="card"><div class="label">Today</div><div class="value" id="tDay">–</div><div class="sub" id="tDayPct"></div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Holdings</h2>
+      <span class="muted small">Click a row to see each purchase and the price chart</span>
+    </div>
+    <div class="table-wrap">
+    <table id="holdings">
+      <thead>
+        <tr>
+          <th data-k="symbol">Stock</th>
+          <th data-k="shares" class="num">Shares</th>
+          <th data-k="avg" class="num">Avg buy price</th>
+          <th data-k="price" class="num">Current price</th>
+          <th data-k="dayPct" class="num">Today</th>
+          <th data-k="costBase" class="num">Invested</th>
+          <th data-k="valueBase" class="num">Value</th>
+          <th data-k="gainBase" class="num">Gain / loss</th>
+          <th data-k="retPct" class="num">Return</th>
+          <th data-k="weight" class="num">Weight</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <p id="empty" class="muted hidden">No stocks yet. Click <b>+ Add purchase</b> to add your first one.</p>
+  </section>
+
+  <section class="panel hidden" id="detail">
+    <div class="panel-head">
+      <h2 id="dTitle"></h2>
+      <div class="ranges" id="ranges">
+        <button data-r="1mo">1M</button><button data-r="6mo">6M</button><button data-r="ytd">YTD</button>
+        <button data-r="1y" class="active">1Y</button><button data-r="5y">5Y</button><button data-r="max">Max</button>
+      </div>
+    </div>
+    <div class="chart-box tall"><canvas id="histChart"></canvas></div>
+    <h3>Purchases</h3>
+    <div class="table-wrap">
+    <table id="lots">
+      <thead><tr><th>Date</th><th class="num">Shares</th><th class="num">Buy price</th><th class="num">Invested</th><th class="num">Value now</th><th class="num">Gain / loss</th><th class="num">Return</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="panel"><h2>Allocation</h2><div class="chart-box"><canvas id="allocChart"></canvas></div></div>
+    <div class="panel"><h2>Return per stock</h2><div class="chart-box"><canvas id="retChart"></canvas></div></div>
+  </section>
+
+  <footer class="muted small">
+    Prices from Yahoo Finance, refreshed every 60 s (may be delayed). Totals in other currencies use today's exchange rate.
+    <a href="#" id="exportBtn">Export</a> · <a href="#" id="importBtn">Import</a>
+    <input type="file" id="importFile" accept="application/json" class="hidden">
+  </footer>
+</main>
+
+<dialog id="lotDialog">
+  <form id="lotForm" method="dialog">
+    <h2 id="lotDialogTitle">Add purchase</h2>
+    <label>Stock ticker or name
+      <div class="ac">
+        <input id="fSymbol" autocomplete="off" placeholder="e.g. AAPL, Tesla, SAP.DE" required>
+        <ul id="acList" class="hidden"></ul>
+      </div>
+    </label>
+    <div id="fInfo" class="muted small"></div>
+    <div class="row">
+      <label>Number of shares<input id="fShares" type="number" step="any" min="0" required></label>
+      <label>Price per share <span id="fCur" class="muted"></span><input id="fPrice" type="number" step="any" min="0" required></label>
+    </div>
+    <label>Purchase date<input id="fDate" type="date"></label>
+    <div class="dialog-actions">
+      <button type="button" class="ghost" id="cancelBtn">Cancel</button>
+      <button type="submit" id="saveBtn">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
