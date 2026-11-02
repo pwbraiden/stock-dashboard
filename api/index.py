@@ -1,5 +1,6 @@
 """Yahoo Finance proxy API (Vercel serverless function; also used by server.py locally)."""
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -12,17 +13,15 @@ UA = {"User-Agent": "Mozilla/5.0"}  # Yahoo rate-limits fuller browser/python UA
 _cache = {}
 
 
-def fetch_json(url, ttl, bust=False):
+def fetch_json(url, ttl):
     now = time.time()
     hit = _cache.get(url)
     if hit and now - hit[0] < ttl:
         return hit[1]
     err = None
-    # Yahoo's edge cache can serve Vercel minutes-old quotes; a changing query param skips it.
-    live = url + ("&_=%d" % now if bust else "")
     for host in ("query1", "query2"):
         try:
-            req = urllib.request.Request(live.replace("query1", host), headers=UA)
+            req = urllib.request.Request(url.replace("query1", host), headers=UA)
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.load(r)
             break
@@ -40,7 +39,7 @@ def chart(symbol, rng="1d", interval="1d", ttl=30, period1=None, events=""):
     span = "period1=%d&period2=%d" % (period1, int(time.time()) // 60 * 60) if period1 else "range=" + rng
     url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?%s&interval=%s%s" % (
         urllib.parse.quote(symbol), span, interval, "&events=" + events if events else "")
-    res = fetch_json(url, ttl, bust=ttl <= 60)["chart"]["result"][0]
+    res = fetch_json(url, ttl)["chart"]["result"][0]
     meta = res["meta"]
     scale = 1.0
     currency = meta.get("currency") or "USD"
@@ -49,10 +48,53 @@ def chart(symbol, rng="1d", interval="1d", ttl=30, period1=None, events=""):
     return res, meta, currency, scale
 
 
+NDQ_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36", "Accept": "application/json"}
+_ndq_cls = {}
+_ndq_pool = ThreadPoolExecutor(16)
+
+
+def nasdaq_live(symbol):
+    """Real-time last trade from Nasdaq for US tickers while the market is open.
+    Yahoo serves Vercel's servers quotes about 10 minutes late."""
+    if not re.fullmatch(r"[A-Z]{1,5}(-[A-Z])?", symbol):
+        return None
+    key = "ndq:" + symbol
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < 15:
+        return hit[1]
+    price = None
+    for cls in [_ndq_cls[symbol]] if symbol in _ndq_cls else ["stocks", "etf"]:
+        url = "https://api.nasdaq.com/api/quote/%s/info?assetclass=%s" % (symbol.replace("-", "."), cls)
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=NDQ_UA), timeout=4) as r:
+                d = json.load(r).get("data")
+        except Exception:  # noqa: BLE001
+            return None
+        if not d:
+            continue
+        _ndq_cls[symbol] = cls
+        p = d.get("primaryData") or {}
+        if d.get("marketStatus") == "Open" and p.get("isRealTime"):
+            try:
+                price = float(p["lastSalePrice"].replace("$", "").replace(",", ""))
+            except (KeyError, ValueError):
+                pass
+        break
+    _cache[key] = (time.time(), price)
+    return price
+
+
 def quote(symbol):
+    live = _ndq_pool.submit(nasdaq_live, symbol)
     try:
         res, meta, currency, scale = chart(symbol, "5d", "1d")
         price = meta.get("regularMarketPrice")
+        try:
+            fresh = live.result(timeout=5)
+        except Exception:  # noqa: BLE001
+            fresh = None
+        if fresh and currency == "USD":
+            price, meta = fresh, {**meta, "regularMarketTime": int(time.time())}
         prev = None
         closes = [c for c in (res.get("indicators", {}).get("quote", [{}])[0].get("close") or []) if c is not None]
         if len(closes) >= 2:
