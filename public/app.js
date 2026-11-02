@@ -728,5 +728,5 @@ $("#sgBucket").onchange = loadSuggest;
   renderAll();
   loadSuggest();
   await refresh();
-  setInterval(() => refresh(), 60000);
+  setInterval(() => refresh(), 30000);
 })();

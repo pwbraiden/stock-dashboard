@@ -12,15 +12,17 @@ UA = {"User-Agent": "Mozilla/5.0"}  # Yahoo rate-limits fuller browser/python UA
 _cache = {}
 
 
-def fetch_json(url, ttl):
+def fetch_json(url, ttl, bust=False):
     now = time.time()
     hit = _cache.get(url)
     if hit and now - hit[0] < ttl:
         return hit[1]
     err = None
+    # Yahoo's edge cache can serve Vercel minutes-old quotes; a changing query param skips it.
+    live = url + ("&_=%d" % now if bust else "")
     for host in ("query1", "query2"):
         try:
-            req = urllib.request.Request(url.replace("query1", host), headers=UA)
+            req = urllib.request.Request(live.replace("query1", host), headers=UA)
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.load(r)
             break
@@ -38,7 +40,7 @@ def chart(symbol, rng="1d", interval="1d", ttl=30, period1=None, events=""):
     span = "period1=%d&period2=%d" % (period1, int(time.time()) // 60 * 60) if period1 else "range=" + rng
     url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?%s&interval=%s%s" % (
         urllib.parse.quote(symbol), span, interval, "&events=" + events if events else "")
-    res = fetch_json(url, ttl)["chart"]["result"][0]
+    res = fetch_json(url, ttl, bust=ttl <= 60)["chart"]["result"][0]
     meta = res["meta"]
     scale = 1.0
     currency = meta.get("currency") or "USD"
