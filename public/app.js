@@ -34,17 +34,6 @@ const lotWhen = (l) => `${l.date || ""}T${l.time || "00:00"}`;
 const ownerOf = (l) => (l.owner === "gf" ? "gf" : "me");
 const isSell = (l) => l.side === "sell";
 const byWhen = (a, b) => lotWhen(a).localeCompare(lotWhen(b)) || isSell(a) - isSell(b);
-// Match sells to the oldest buys first. left: shares of each buy still held; cost: buy cost of the shares each sell used up.
-function fifo(lots) {
-  const left = new Map(), cost = new Map(), open = [];
-  for (const l of [...lots].sort(byWhen)) {
-    if (!isSell(l)) { left.set(l, l.shares); open.push(l); continue; }
-    let n = l.shares, c = 0;
-    while (n > 1e-9 && open.length) { const b = open[0], k = Math.min(n, left.get(b)); left.set(b, left.get(b) - k); n -= k; c += k * b.price; if (left.get(b) <= 1e-9) open.shift(); }
-    cost.set(l, c);
-  }
-  return { left, cost };
-}
 
 const SAMPLE = [
   { symbol: "AAPL", shares: 10, price: 150, date: "2023-03-15", owner: "me" },
@@ -89,18 +78,18 @@ function computeRows(lotsAll) {
     const q = state.quotes[symbol] || {};
     const cur = q.currency || "USD";
     const fx = state.fx[cur] ?? (cur === state.base ? 1 : null);
-    const f = fifo(lots), buys = lots.filter((l) => !isSell(l)), sells = lots.filter(isSell);
-    let shares = buys.reduce((s, l) => s + f.left.get(l), 0);
+    const buys = lots.filter((l) => !isSell(l)), sells = lots.filter(isSell);
+    let shares = buys.reduce((s, l) => s + l.shares, 0) - sells.reduce((s, l) => s + l.shares, 0);
     if (shares < 1e-9) shares = 0;
-    const cost = buys.reduce((s, l) => s + f.left.get(l) * l.price, 0);
     const bought = buys.reduce((s, l) => s + l.shares * l.price, 0);
     const proceeds = sells.reduce((s, l) => s + l.shares * l.price, 0);
-    const realized = proceeds - sells.reduce((s, l) => s + f.cost.get(l), 0);
+    // Break-even basis: what was paid minus what sales brought back.
+    const cost = bought - proceeds;
     const value = !shares ? 0 : q.price != null ? shares * q.price : null;
-    const gain = value != null ? value - cost + realized : null;
+    const gain = value != null ? value - cost : null;
     const dayChange = q.price != null && q.previousClose ? shares * (q.price - q.previousClose) : null;
     return {
-      symbol, lots, fifo: f, q, cur, shares, cost, value, gain, realized, soldOut: !shares,
+      symbol, lots, q, cur, shares, cost, value, gain, hasSells: sells.length > 0, soldOut: !shares,
       name: q.name || symbol,
       avg: shares ? cost / shares : null, price: q.price,
       dayPct: q.previousClose ? (q.price / q.previousClose - 1) * 100 : null,
@@ -178,21 +167,19 @@ function renderLots() {
   tb.innerHTML = "";
   const sorted = [...r.lots].sort(byWhen);
   for (const l of sorted) {
-    const sell = isSell(l), left = sell ? 0 : r.fifo.left.get(l);
-    const cost = sell ? r.fifo.cost.get(l) : left * l.price;
-    const val = sell ? l.shares * l.price : r.price != null ? left * r.price : null;
-    const g = val != null ? val - cost : null, p = g != null && cost ? (g / cost) * 100 : null;
-    const sharesCell = sell ? `<span class="tag sell">Sold</span> ${num(l.shares)}`
-      : left < l.shares - 1e-9 ? `${num(l.shares)}<div class="small muted">${left > 1e-9 ? num(left) + " left" : "all sold"}</div>` : num(l.shares);
+    // Once a stock has sales, gains only make sense for the whole position (Total row).
+    const sell = isSell(l), amt = l.shares * l.price, mixed = r.hasSells;
+    const val = mixed ? null : r.price != null ? l.shares * r.price : null;
+    const g = val != null ? val - amt : null, p = g != null && amt ? (g / amt) * 100 : null;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(l.date || "–")}${l.time ? ` <span class="muted">${esc(l.time)}</span>` : ""}</td><td class="num">${sharesCell}</td><td class="num">${money(l.price, r.cur)}</td>
-      <td class="num">${sell ? '<span class="muted small">cost</span> ' : ""}${money(cost, r.cur)}</td><td class="num">${sell ? '<span class="muted small">got</span> ' : ""}${money(val, r.cur)}</td>
+    tr.innerHTML = `<td>${esc(l.date || "–")}${l.time ? ` <span class="muted">${esc(l.time)}</span>` : ""}</td><td class="num">${sell ? '<span class="tag sell">Sold</span> ' : ""}${num(l.shares)}</td><td class="num">${money(l.price, r.cur)}</td>
+      <td class="num">${sell ? "" : money(amt, r.cur)}</td><td class="num">${sell ? '<span class="muted small">got</span> ' + money(amt, r.cur) : mixed ? "" : money(val, r.cur)}</td>
       <td class="num ${cls(g)}">${signed(g, r.cur)}</td><td class="num"><span class="pill ${cls(p)}">${pct(p)}</span></td>
       <td class="num"><button class="icon" data-edit="${l.id}" title="Edit">&#9998;</button><button class="icon" data-del="${l.id}" title="Delete">&#x2715;</button></td>`;
     tb.appendChild(tr);
   }
   const tr = document.createElement("tr");
-  tr.innerHTML = `<td><b>Total</b></td><td class="num"><b>${r.soldOut ? "–" : num(r.shares)}</b></td><td class="num"><b>${money(r.avg, r.cur)}</b> <span class="muted small">avg</span></td>
+  tr.innerHTML = `<td><b>Total</b></td><td class="num"><b>${r.soldOut ? "–" : num(r.shares)}</b></td><td class="num"><b>${money(r.avg, r.cur)}</b> <span class="muted small">${r.hasSells ? "break-even" : "avg"}</span></td>
     <td class="num"><b>${money(r.cost, r.cur)}</b></td><td class="num"><b>${money(r.value, r.cur)}</b></td>
     <td class="num ${cls(r.gain)}"><b>${signed(r.gain, r.cur)}</b></td><td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span></td>
     <td class="num"><button class="icon" data-addfor="${esc(r.symbol)}" title="Add a buy">+ Buy</button>${r.soldOut ? "" : `<button class="icon" data-sellfor="${esc(r.symbol)}" title="Add a sale">Sell</button>`}</td>`;
