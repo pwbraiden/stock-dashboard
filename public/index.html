@@ -14,13 +14,13 @@
     <span id="updated" class="muted"></span>
     <button id="refresh" class="ghost" title="Refresh prices">&#x21bb; Refresh</button>
     <button id="shareBtn" class="ghost" title="Copy a link that loads these holdings">Share</button>
-    <button id="addBtn">+ Add purchase</button>
+    <button id="addBtn">+ Add buy / sell</button>
   </div>
 </header>
 
 <main>
   <div id="sampleBanner" class="banner hidden">
-    <span>You're looking at <b>sample stocks</b>. Add your own with <b>+ Add purchase</b>, then</span>
+    <span>You're looking at <b>sample stocks</b>. Add your own with <b>+ Add buy / sell</b>, then</span>
     <button id="clearSample" class="ghost">Remove sample stocks</button>
   </div>
   <div class="layout">
@@ -120,6 +120,7 @@
 <dialog id="lotDialog">
   <form id="lotForm" method="dialog">
     <h2 id="lotDialogTitle">Add purchase</h2>
+    <label>Type<select id="fSide"><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
     <label>Stock ticker or name
       <div class="ac">
         <input id="fSymbol" autocomplete="off" placeholder="e.g. AAPL, Tesla, SAP.DE" required>
@@ -132,7 +133,7 @@
       <label>Price per share <span id="fCur" class="muted"></span><input id="fPrice" type="number" step="any" min="0" required></label>
     </div>
     <div class="row">
-      <label>Purchase date<input id="fDate" type="date"></label>
+      <label><span id="fDateLbl">Purchase date</span><input id="fDate" type="date"></label>
       <label>Time <span class="muted">(optional)</span><input id="fTime" type="time"></label>
     </div>
     <label>Whose?<select id="fOwner"><option value="me"></option><option value="gf"></option></select></label>
@@ -147,7 +148,7 @@
   <h2 id="dTitle"></h2>
   <div class="table-wrap">
   <table id="lots">
-    <thead><tr><th>Date</th><th class="num">Shares</th><th class="num">Buy price</th><th class="num">Invested</th><th class="num">Value now</th><th class="num">Gain / loss</th><th class="num">Return</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Invested</th><th class="num">Value now</th><th class="num">Gain / loss</th><th class="num">Return</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
   </div>

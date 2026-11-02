@@ -32,6 +32,19 @@ const localDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear(
 const localWhen = (t) => { const d = new Date(t * 1000); return `${localDay(t)}T${p2(d.getHours())}:${p2(d.getMinutes())}`; };
 const lotWhen = (l) => `${l.date || ""}T${l.time || "00:00"}`;
 const ownerOf = (l) => (l.owner === "gf" ? "gf" : "me");
+const isSell = (l) => l.side === "sell";
+const byWhen = (a, b) => lotWhen(a).localeCompare(lotWhen(b)) || isSell(a) - isSell(b);
+// Match sells to the oldest buys first. left: shares of each buy still held; cost: buy cost of the shares each sell used up.
+function fifo(lots) {
+  const left = new Map(), cost = new Map(), open = [];
+  for (const l of [...lots].sort(byWhen)) {
+    if (!isSell(l)) { left.set(l, l.shares); open.push(l); continue; }
+    let n = l.shares, c = 0;
+    while (n > 1e-9 && open.length) { const b = open[0], k = Math.min(n, left.get(b)); left.set(b, left.get(b) - k); n -= k; c += k * b.price; if (left.get(b) <= 1e-9) open.shift(); }
+    cost.set(l, c);
+  }
+  return { left, cost };
+}
 
 const SAMPLE = [
   { symbol: "AAPL", shares: 10, price: 150, date: "2023-03-15", owner: "me" },
@@ -50,7 +63,7 @@ function loadLots() {
   $("#sampleBanner").classList.toggle("hidden", !state.lots.some((l) => l.sample));
 }
 function cleanLot(b) {
-  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || ""), time: /^\d\d:\d\d$/.test(b.time || "") ? b.time : "", owner: ownerOf(b) };
+  const lot = { symbol: String(b.symbol || "").trim().toUpperCase(), shares: +b.shares, price: +b.price, date: String(b.date || ""), time: /^\d\d:\d\d$/.test(b.time || "") ? b.time : "", owner: ownerOf(b), ...(b.side === "sell" ? { side: "sell" } : {}) };
   if (!lot.symbol || !(lot.shares > 0) || !(lot.price >= 0)) throw new Error("Please enter a ticker, shares and price");
   return lot;
 }
@@ -76,18 +89,25 @@ function computeRows(lotsAll) {
     const q = state.quotes[symbol] || {};
     const cur = q.currency || "USD";
     const fx = state.fx[cur] ?? (cur === state.base ? 1 : null);
-    const shares = lots.reduce((s, l) => s + l.shares, 0);
-    const cost = lots.reduce((s, l) => s + l.shares * l.price, 0);
-    const value = q.price != null ? shares * q.price : null;
-    const gain = value != null ? value - cost : null;
+    const f = fifo(lots), buys = lots.filter((l) => !isSell(l)), sells = lots.filter(isSell);
+    let shares = buys.reduce((s, l) => s + f.left.get(l), 0);
+    if (shares < 1e-9) shares = 0;
+    const cost = buys.reduce((s, l) => s + f.left.get(l) * l.price, 0);
+    const bought = buys.reduce((s, l) => s + l.shares * l.price, 0);
+    const proceeds = sells.reduce((s, l) => s + l.shares * l.price, 0);
+    const realized = proceeds - sells.reduce((s, l) => s + f.cost.get(l), 0);
+    const value = !shares ? 0 : q.price != null ? shares * q.price : null;
+    const gain = value != null ? value - cost + realized : null;
     const dayChange = q.price != null && q.previousClose ? shares * (q.price - q.previousClose) : null;
     return {
-      symbol, lots, q, cur, shares, cost, value, gain,
+      symbol, lots, fifo: f, q, cur, shares, cost, value, gain, realized, soldOut: !shares,
       name: q.name || symbol,
-      avg: cost / shares, price: q.price,
+      avg: shares ? cost / shares : null, price: q.price,
       dayPct: q.previousClose ? (q.price / q.previousClose - 1) * 100 : null,
-      retPct: gain != null && cost ? (gain / cost) * 100 : null,
+      retPct: gain != null && bought ? (gain / bought) * 100 : null,
       costBase: fx != null ? cost * fx : null,
+      boughtBase: fx != null ? bought * fx : null,
+      proceedsBase: fx != null ? proceeds * fx : null,
       valueBase: value != null && fx != null ? value * fx : null,
       gainBase: gain != null && fx != null ? gain * fx : null,
       dayBase: dayChange != null && fx != null ? dayChange * fx : null,
@@ -96,6 +116,7 @@ function computeRows(lotsAll) {
   });
   const { k, dir } = state.sort;
   rows.sort((a, b) => {
+    if (a.soldOut !== b.soldOut) return a.soldOut - b.soldOut;
     const x = a[k], y = b[k];
     if (typeof x === "string") return dir * x.localeCompare(y);
     return dir * ((x ?? -Infinity) - (y ?? -Infinity));
@@ -108,11 +129,13 @@ function renderOwner(o) {
   const box = document.querySelector(`.owner[data-owner=${o}]`);
   box.querySelector(".oname").textContent = state.names[o];
   const value = rows.reduce((s, r) => s + (r.valueBase || 0), 0);
-  const cost = rows.reduce((s, r) => s + (r.valueBase != null ? r.costBase : 0), 0);
-  const day = rows.reduce((s, r) => s + (r.dayBase || 0), 0), gain = value - cost;
+  const ok = rows.filter((r) => r.valueBase != null);
+  const cost = ok.reduce((s, r) => s + r.boughtBase, 0), sold = ok.reduce((s, r) => s + r.proceedsBase, 0);
+  const day = rows.reduce((s, r) => s + (r.dayBase || 0), 0), gain = value + sold - cost;
   box.querySelector(".totals").innerHTML = rows.length ? `
     <span>Value<b>${money(value, B)}</b></span>
-    <span>Invested<b>${money(cost, B)}</b></span>
+    <span>Invested<b>${money(cost, B)}</b></span>${sold ? `
+    <span>Sold for<b>${money(sold, B)}</b></span>` : ""}
     <span>Gain / loss<b class="${cls(gain)}">${signed(gain, B)} <small>${cost ? pct((gain / cost) * 100) : ""}</small></b></span>
     <span>Today<b class="${cls(day)}">${signed(day, B)}</b></span>` : "";
   box.querySelector(".empty").classList.toggle("hidden", rows.length > 0);
@@ -120,12 +143,13 @@ function renderOwner(o) {
   tb.innerHTML = "";
   for (const r of rows) {
     const tr = document.createElement("tr");
+    if (r.soldOut) tr.className = "soldout";
     tr.innerHTML = `
       <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${r.error ? '<span class="down">Price unavailable</span>' : esc(r.name)}</div>${state.about[r.symbol] ? `<div class="about">${esc(state.about[r.symbol])}</div>` : ""}</td>
-      <td class="num">${num(r.shares)}</td>
+      <td class="num">${r.soldOut ? "–" : num(r.shares)}</td>
       <td class="num">${money(r.avg, r.cur)}</td>
       <td class="num"><b>${money(r.price, r.cur)}</b><div class="small ${cls(r.dayPct)}">${pct(r.dayPct)}</div></td>
-      <td class="num"><b>${money(r.valueBase, B)}</b></td>
+      <td class="num">${r.soldOut ? '<span class="muted">Sold</span>' : `<b>${money(r.valueBase, B)}</b>`}</td>
       <td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span><div class="small ${cls(r.gainBase)}">${signed(r.gainBase, B)}</div></td>`;
     tr.onclick = () => openStock(o, r.symbol);
     tb.appendChild(tr);
@@ -152,22 +176,26 @@ function renderLots() {
   $("#dTitle").innerHTML = `${esc(r.symbol)} <span class="muted" style="font-weight:400">${esc(r.name)} · ${esc(state.names[o])}</span> &nbsp;<span>${money(r.price, r.cur)}</span> <span class="${cls(r.dayPct)} small">${pct(r.dayPct)} today</span>`;
   const tb = $("#lots tbody");
   tb.innerHTML = "";
-  const sorted = [...r.lots].sort((a, b) => lotWhen(a).localeCompare(lotWhen(b)));
+  const sorted = [...r.lots].sort(byWhen);
   for (const l of sorted) {
-    const cost = l.shares * l.price, val = r.price != null ? l.shares * r.price : null;
+    const sell = isSell(l), left = sell ? 0 : r.fifo.left.get(l);
+    const cost = sell ? r.fifo.cost.get(l) : left * l.price;
+    const val = sell ? l.shares * l.price : r.price != null ? left * r.price : null;
     const g = val != null ? val - cost : null, p = g != null && cost ? (g / cost) * 100 : null;
+    const sharesCell = sell ? `<span class="tag sell">Sold</span> ${num(l.shares)}`
+      : left < l.shares - 1e-9 ? `${num(l.shares)}<div class="small muted">${left > 1e-9 ? num(left) + " left" : "all sold"}</div>` : num(l.shares);
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(l.date || "–")}${l.time ? ` <span class="muted">${esc(l.time)}</span>` : ""}</td><td class="num">${num(l.shares)}</td><td class="num">${money(l.price, r.cur)}</td>
-      <td class="num">${money(cost, r.cur)}</td><td class="num">${money(val, r.cur)}</td>
+    tr.innerHTML = `<td>${esc(l.date || "–")}${l.time ? ` <span class="muted">${esc(l.time)}</span>` : ""}</td><td class="num">${sharesCell}</td><td class="num">${money(l.price, r.cur)}</td>
+      <td class="num">${sell ? '<span class="muted small">cost</span> ' : ""}${money(cost, r.cur)}</td><td class="num">${sell ? '<span class="muted small">got</span> ' : ""}${money(val, r.cur)}</td>
       <td class="num ${cls(g)}">${signed(g, r.cur)}</td><td class="num"><span class="pill ${cls(p)}">${pct(p)}</span></td>
       <td class="num"><button class="icon" data-edit="${l.id}" title="Edit">&#9998;</button><button class="icon" data-del="${l.id}" title="Delete">&#x2715;</button></td>`;
     tb.appendChild(tr);
   }
   const tr = document.createElement("tr");
-  tr.innerHTML = `<td><b>Total</b></td><td class="num"><b>${num(r.shares)}</b></td><td class="num"><b>${money(r.avg, r.cur)}</b> <span class="muted small">avg</span></td>
+  tr.innerHTML = `<td><b>Total</b></td><td class="num"><b>${r.soldOut ? "–" : num(r.shares)}</b></td><td class="num"><b>${money(r.avg, r.cur)}</b> <span class="muted small">avg</span></td>
     <td class="num"><b>${money(r.cost, r.cur)}</b></td><td class="num"><b>${money(r.value, r.cur)}</b></td>
     <td class="num ${cls(r.gain)}"><b>${signed(r.gain, r.cur)}</b></td><td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span></td>
-    <td class="num"><button class="icon" data-addfor="${esc(r.symbol)}" title="Add purchase">+ Add</button></td>`;
+    <td class="num"><button class="icon" data-addfor="${esc(r.symbol)}" title="Add a buy">+ Buy</button>${r.soldOut ? "" : `<button class="icon" data-sellfor="${esc(r.symbol)}" title="Add a sale">Sell</button>`}</td>`;
   tb.appendChild(tr);
 }
 $("#closeStock").onclick = () => { state.selected = null; sdlg.close(); };
@@ -184,11 +212,18 @@ async function refresh() {
 const dlg = $("#lotDialog");
 let acTimer, acItems = [], acIdx = -1;
 
-function openDialog(lot = null, symbol = "", owner = null) {
+function setSideUi() {
+  const sell = $("#fSide").value === "sell";
+  $("#lotDialogTitle").textContent = (state.editId ? "Edit " : "Add ") + (sell ? "sale" : "purchase");
+  $("#fDateLbl").textContent = sell ? "Sale date" : "Purchase date";
+}
+$("#fSide").onchange = setSideUi;
+function openDialog(lot = null, symbol = "", owner = null, side = "buy") {
   OWNERS.forEach((o) => ($(`#fOwner option[value=${o}]`).textContent = state.names[o]));
   $("#fOwner").value = lot ? ownerOf(lot) : owner || localStorage.getItem("lastOwner") || "me";
   state.editId = lot ? lot.id : null;
-  $("#lotDialogTitle").textContent = lot ? "Edit purchase" : "Add purchase";
+  $("#fSide").value = lot ? (isSell(lot) ? "sell" : "buy") : side;
+  setSideUi();
   $("#fSymbol").value = lot ? lot.symbol : symbol;
   $("#fShares").value = lot ? lot.shares : "";
   $("#fPrice").value = lot ? lot.price : "";
@@ -247,7 +282,13 @@ $("#cancelBtn").onclick = () => dlg.close();
 $("#lotForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   let lot;
-  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value, time: $("#fTime").value, owner: $("#fOwner").value });
+  try { lot = cleanLot({ symbol: $("#fSymbol").value, shares: $("#fShares").value, price: $("#fPrice").value, date: $("#fDate").value, time: $("#fTime").value, owner: $("#fOwner").value, side: $("#fSide").value });
+  if (isSell(lot)) {
+    const others = state.lots.filter((l) => l.id !== state.editId && l.symbol === lot.symbol && ownerOf(l) === lot.owner);
+    const when = lotWhen(lot), before = others.filter((l) => lotWhen(l) <= when);
+    const held = before.reduce((s, l) => s + (isSell(l) ? -l.shares : l.shares), 0);
+    if (lot.shares > held + 1e-9) throw new Error(`${state.names[lot.owner]} only held ${num(Math.max(0, held))} ${lot.symbol} shares on that date`);
+  }
   localStorage.setItem("lastOwner", lot.owner); }
   catch (err) { $("#fInfo").innerHTML = `<span class="down">${err.message}</span>`; return; }
   if (state.editId) state.lots = state.lots.map((l) => (l.id === state.editId ? { ...lot, id: l.id } : l));
@@ -261,7 +302,8 @@ $("#lots").addEventListener("click", async (e) => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.edit) openDialog(state.lots.find((l) => l.id === b.dataset.edit));
   if (b.dataset.addfor) openDialog(null, b.dataset.addfor, state.selected?.o);
-  if (b.dataset.del && confirm("Delete this purchase?")) {
+  if (b.dataset.sellfor) openDialog(null, b.dataset.sellfor, state.selected?.o, "sell");
+  if (b.dataset.del && confirm(isSell(state.lots.find((l) => l.id === b.dataset.del) || {}) ? "Delete this sale?" : "Delete this purchase?")) {
     state.lots = state.lots.filter((l) => l.id !== b.dataset.del);
     saveLots(); loadLots(); await refresh();
   }
@@ -297,11 +339,11 @@ $("#importBtn").onclick = (e) => { e.preventDefault(); $("#importFile").click();
 $("#importFile").onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   try {
-    const key = (l) => [l.symbol, l.shares, l.price, l.date, l.time, ownerOf(l)].join("|");
+    const key = (l) => [l.symbol, l.shares, l.price, l.date, l.time, ownerOf(l), isSell(l) ? "sell" : ""].join("|");
     const have = new Set(state.lots.map(key));
     const add = JSON.parse(await f.text()).map(cleanLot).filter((l) => !have.has(key(l)) && have.add(key(l)));
     const skipped = add.length ? "" : " (all were already there)";
-    if (!confirm(`Add ${add.length} purchase${add.length === 1 ? "" : "s"} to your holdings?${skipped}`) || !add.length) return;
+    if (!confirm(`Add ${add.length} trade${add.length === 1 ? "" : "s"} to your holdings?${skipped}`) || !add.length) return;
     state.lots = [...state.lots, ...add.map((l) => ({ ...l, id: newId() }))];
     saveLots(); loadLots(); await refresh();
   }
@@ -343,8 +385,10 @@ async function renderCompare() {
       for (const l of lots) {
         if (l.date && lotWhen(l) > when) continue;
         const p = px[l.symbol][i], f = fxOf(l.symbol);
-        const basis = l.date && lotWhen(l) >= start.when ? l.price : firstPx[l.symbol];
+        const after = l.date && lotWhen(l) >= start.when, basis = after ? l.price : firstPx[l.symbol];
         if (p == null || f == null || basis == null) continue;
+        // A sale swaps the shares for cash; one before the start just means fewer shares were held at the start.
+        if (isSell(l)) { v -= l.shares * (p - (after ? l.price : 0)) * f; if (!after) c -= l.shares * basis * f; continue; }
         v += l.shares * p * f; c += l.shares * basis * f;
       }
       return c > 0 ? (v / c - 1) * 100 : null;
@@ -460,13 +504,13 @@ function whatIf(d) {
   if (!d.bLast) return null;
   const q = qqqTarget(d), B = state.base, method = mode === "recovery" ? whatIfRecovery : mode === "targets" ? whatIfTargets : whatIfBeta;
   const out = [q.line], missing = new Set(), ret = {}, all = {};
-  for (const o of ["me", "gf"]) for (const r of (state.rows[o] || []).filter((r) => r.valueBase != null))
+  for (const o of ["me", "gf"]) for (const r of (state.rows[o] || []).filter((r) => r.valueBase != null && !r.soldOut))
     all[r.symbol] = all[r.symbol] ? { ...all[r.symbol], valueBase: all[r.symbol].valueBase + r.valueBase } : { ...r };
   const allRows = Object.values(all).sort((x, y) => y.valueBase - x.valueBase);
   const table = allRows.length ? method(d, allRows, allRows.reduce((a, r) => a + r.valueBase, 0), q) : null;
   const res_rows = [];
   for (const o of ["me", "gf"]) {
-    const rows = (state.rows[o] || []).filter((r) => r.valueBase != null);
+    const rows = (state.rows[o] || []).filter((r) => r.valueBase != null && !r.soldOut);
     if (!rows.length) continue;
     const total = rows.reduce((a, r) => a + r.valueBase, 0), name = `<span class="dot" style="background:${COLORS[o]}"></span>${esc(state.names[o])}`;
     const res = method(d, rows, total, q);
@@ -620,7 +664,7 @@ const b64u = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").
 const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
 async function shareLink() {
-  const data = { n: state.names, l: state.lots.filter((l) => !l.sample).map((l) => [l.symbol, l.shares, l.price, l.date || "", l.time || "", ownerOf(l)]) };
+  const data = { n: state.names, l: state.lots.filter((l) => !l.sample).map((l) => [l.symbol, l.shares, l.price, l.date || "", l.time || "", ownerOf(l), ...(isSell(l) ? ["sell"] : [])]) };
   const json = new TextEncoder().encode(JSON.stringify(data));
   const code = window.CompressionStream ? "z" + b64u(await pipe(json, new CompressionStream("deflate-raw"))) : "j" + b64u(json);
   return `${location.origin}${location.pathname}#s=${code}`;
@@ -633,9 +677,9 @@ async function readShared() {
     let bytes = unb64u(m[2]);
     if (m[1] === "z") bytes = await pipe(bytes, new DecompressionStream("deflate-raw"));
     const data = JSON.parse(new TextDecoder().decode(bytes));
-    const lots = data.l.map(([symbol, shares, price, date, time, owner]) => ({ ...cleanLot({ symbol, shares, price, date, time, owner }), id: newId() }));
+    const lots = data.l.map(([symbol, shares, price, date, time, owner, side]) => ({ ...cleanLot({ symbol, shares, price, date, time, owner, side }), id: newId() }));
     const mine = state.lots.filter((l) => !l.sample).length;
-    if (mine && !confirm(`Load the shared portfolio (${lots.length} purchases)? It replaces the ${mine} purchase${mine === 1 ? "" : "s"} saved in this browser.`)) return;
+    if (mine && !confirm(`Load the shared portfolio (${lots.length} trades)? It replaces the ${mine} trade${mine === 1 ? "" : "s"} saved in this browser.`)) return;
     state.lots = lots; saveLots();
     if (data.n) { state.names = { ...state.names, ...data.n }; localStorage.setItem("names", JSON.stringify(state.names)); }
     loadLots();
