@@ -54,34 +54,35 @@ _ndq_pool = ThreadPoolExecutor(16)
 
 
 def nasdaq_live(symbol):
-    """Real-time last trade from Nasdaq for US tickers while the market is open.
+    """(market status, real-time last trade) from Nasdaq for US tickers, incl. pre-market and after hours.
     Yahoo serves Vercel's servers quotes about 10 minutes late."""
     if not re.fullmatch(r"[A-Z]{1,5}(-[A-Z])?", symbol):
-        return None
+        return None, None
     key = "ndq:" + symbol
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < 15:
         return hit[1]
-    price = None
+    status = price = None
     for cls in [_ndq_cls[symbol]] if symbol in _ndq_cls else ["stocks", "etf"]:
         url = "https://api.nasdaq.com/api/quote/%s/info?assetclass=%s" % (symbol.replace("-", "."), cls)
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=NDQ_UA), timeout=4) as r:
                 d = json.load(r).get("data")
         except Exception:  # noqa: BLE001
-            return None
+            return None, None
         if not d:
             continue
         _ndq_cls[symbol] = cls
         p = d.get("primaryData") or {}
-        if d.get("marketStatus") == "Open" and p.get("isRealTime"):
+        status = d.get("marketStatus")
+        if p.get("isRealTime"):
             try:
                 price = float(p["lastSalePrice"].replace("$", "").replace(",", ""))
             except (KeyError, ValueError):
                 pass
         break
-    _cache[key] = (time.time(), price)
-    return price
+    _cache[key] = (time.time(), (status, price))
+    return status, price
 
 
 def quote(symbol):
@@ -90,11 +91,15 @@ def quote(symbol):
         res, meta, currency, scale = chart(symbol, "5d", "1d")
         price = meta.get("regularMarketPrice")
         try:
-            fresh = live.result(timeout=5)
+            status, fresh = live.result(timeout=5)
         except Exception:  # noqa: BLE001
-            fresh = None
+            status = fresh = None
+        ext = None
         if fresh and currency == "USD":
-            price, meta = fresh, {**meta, "regularMarketTime": int(time.time())}
+            if status == "Open":
+                price, meta = fresh, {**meta, "regularMarketTime": int(time.time())}
+            elif status in ("Pre-Market", "After-Hours"):
+                ext = {"ext": fresh, "extLabel": "Pre-market" if status == "Pre-Market" else "After hours"}
         prev = None
         closes = [c for c in (res.get("indicators", {}).get("quote", [{}])[0].get("close") or []) if c is not None]
         if len(closes) >= 2:
@@ -108,6 +113,7 @@ def quote(symbol):
             "previousClose": prev * scale if prev else None,
             "exchange": meta.get("fullExchangeName") or meta.get("exchangeName"),
             "marketTime": meta.get("regularMarketTime"),
+            **(ext or {}),
         }
     except Exception as e:  # noqa: BLE001
         return {"symbol": symbol, "error": str(e)}
