@@ -660,22 +660,38 @@ async function shareLink() {
   const code = window.CompressionStream ? "z" + b64u(await pipe(json, new CompressionStream("deflate-raw"))) : "j" + b64u(json);
   return `${location.origin}${location.pathname}#s=${code}`;
 }
-async function readShared() {
-  const m = location.hash.match(/^#s=([zj])([\w-]+)$/);
-  if (!m) return;
-  history.replaceState(null, "", location.pathname + location.search);
+// Tolerant of apps that percent-encode the link or tack punctuation onto it.
+async function readShared(src = location.hash) {
+  let text = String(src || "");
+  try { text = decodeURIComponent(text); } catch {}
+  const m = text.match(/[#?&]s=([zj])([\w-]+)/);
+  if (!m) return false;
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
   try {
     let bytes = unb64u(m[2]);
     if (m[1] === "z") bytes = await pipe(bytes, new DecompressionStream("deflate-raw"));
     const data = JSON.parse(new TextDecoder().decode(bytes));
     const lots = data.l.map(([symbol, shares, price, date, time, owner, side]) => ({ ...cleanLot({ symbol, shares, price, date, time, owner, side }), id: newId() }));
     const mine = state.lots.filter((l) => !l.sample).length;
-    if (mine && !confirm(`Load the shared portfolio (${lots.length} trades)? It replaces the ${mine} trade${mine === 1 ? "" : "s"} saved in this browser.`)) return;
+    if (mine && !confirm(`Load the shared portfolio (${lots.length} trades)? It replaces the ${mine} trade${mine === 1 ? "" : "s"} saved in this browser.`)) return false;
     state.lots = lots; saveLots();
     if (data.n) { state.names = { ...state.names, ...data.n }; localStorage.setItem("names", JSON.stringify(state.names)); }
     loadLots();
-  } catch (err) { alert("Couldn't read the shared link: " + err.message); }
+    return true;
+  } catch (err) { alert("Couldn't read the shared link: " + err.message); return false; }
 }
+// A link opened in a tab that already shows the site only changes the hash, without reloading.
+window.addEventListener("hashchange", async () => { if (await readShared()) { renderAll(); refresh(); } });
+// Home-screen apps keep their own storage, so the link can also be pasted in.
+async function pasteShare(e) {
+  e.preventDefault();
+  const text = prompt("Paste the share link here:") || "";
+  if (!text) return;
+  if (await readShared(text)) { renderAll(); refresh(); }
+  else if (!/[#?&]s=[zj]/.test(text)) alert("That isn't a share link. Ask for a new one from the Share button.");
+}
+$("#pasteShare").onclick = pasteShare;
+$("#pasteShareLink").onclick = pasteShare;
 $("#shareBtn").onclick = async () => {
   const url = await shareLink(), btn = $("#shareBtn");
   if (navigator.share && matchMedia("(pointer: coarse)").matches) { try { await navigator.share({ title: "Our Portfolio", url }); } catch {} return; }
