@@ -94,17 +94,17 @@ def quote(symbol):
             status, fresh = live.result(timeout=5)
         except Exception:  # noqa: BLE001
             status = fresh = None
-        ext = None
-        if fresh and currency == "USD":
-            if status == "Open":
-                price, meta = fresh, {**meta, "regularMarketTime": int(time.time())}
-            elif status in ("Pre-Market", "After-Hours"):
-                ext = {"ext": fresh, "extLabel": "Pre-market" if status == "Pre-Market" else "After hours"}
+        ext = last_close = None
+        if fresh and currency == "USD" and status in ("Open", "Pre-Market", "After-Hours"):
+            # Outside regular hours the extended-hours trade is the price, and "today" is measured from the last close.
+            if status != "Open":
+                last_close, ext = price, {"extLabel": "Pre-market" if status == "Pre-Market" else "After hours"}
+            price, meta = fresh, {**meta, "regularMarketTime": int(time.time())}
         prev = None
         closes = [c for c in (res.get("indicators", {}).get("quote", [{}])[0].get("close") or []) if c is not None]
         if len(closes) >= 2:
             prev = closes[-2]
-        prev = meta.get("previousClose") or prev
+        prev = last_close or meta.get("previousClose") or prev
         return {
             "symbol": symbol,
             "name": meta.get("longName") or meta.get("shortName") or symbol,

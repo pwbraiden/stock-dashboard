@@ -88,20 +88,18 @@ function computeRows(lotsAll) {
     const value = !shares ? 0 : q.price != null ? shares * q.price : null;
     const gain = value != null ? value - cost : null;
     const dayChange = q.price != null && q.previousClose ? shares * (q.price - q.previousClose) : null;
-    const extPct = q.ext && q.price ? (q.ext / q.price - 1) * 100 : null;
     return {
       symbol, lots, q, cur, shares, cost, value, gain, hasSells: sells.length > 0, soldOut: !shares,
       name: q.name || symbol,
       avg: shares ? cost / shares : null, price: q.price,
       dayPct: q.previousClose ? (q.price / q.previousClose - 1) * 100 : null,
-      retPct: gain != null && bought ? (gain / bought) * 100 : null,
+      retPct: gain != null && cost > 0 ? (gain / cost) * 100 : null,
       costBase: fx != null ? cost * fx : null,
       boughtBase: fx != null ? bought * fx : null,
       proceedsBase: fx != null ? proceeds * fx : null,
       valueBase: value != null && fx != null ? value * fx : null,
       gainBase: gain != null && fx != null ? gain * fx : null,
       dayBase: dayChange != null && fx != null ? dayChange * fx : null,
-      extPct, extBase: extPct != null && fx != null ? shares * (q.ext - q.price) * fx : null,
       error: q.error,
     };
   });
@@ -116,32 +114,28 @@ function computeRows(lotsAll) {
 }
 
 function renderOwner(o) {
-  const B = state.base, rows = (state.rows[o] = computeRows(state.lots.filter((l) => ownerOf(l) === o)));
+  const B = state.base, rows = (state.rows[o] = computeRows(state.lots.filter((l) => ownerOf(l) === o)).filter((r) => !r.soldOut));
   const box = document.querySelector(`.owner[data-owner=${o}]`);
   box.querySelector(".oname").textContent = state.names[o];
   const value = rows.reduce((s, r) => s + (r.valueBase || 0), 0);
   const ok = rows.filter((r) => r.valueBase != null);
-  const cost = ok.reduce((s, r) => s + r.boughtBase, 0), sold = ok.reduce((s, r) => s + r.proceedsBase, 0);
-  const day = rows.reduce((s, r) => s + (r.dayBase || 0), 0), gain = value + sold - cost;
-  const extRow = rows.find((r) => r.extBase != null && !r.soldOut), ext = rows.reduce((s, r) => s + (r.extBase || 0), 0);
+  const cost = ok.reduce((s, r) => s + r.costBase, 0), gain = value - cost;
+  const day = rows.reduce((s, r) => s + (r.dayBase || 0), 0), ext = rows.find((r) => r.q.extLabel)?.q.extLabel;
   box.querySelector(".totals").innerHTML = rows.length ? `
     <span>Value<b>${money(value, B)}</b></span>
-    <span>Invested<b>${money(cost, B)}</b></span>${sold ? `
-    <span>Sold for<b>${money(sold, B)}</b></span>` : ""}
+    <span>Invested<b>${money(cost, B)}</b></span>
     <span>Gain / loss<b class="${cls(gain)}">${signed(gain, B)} <small>${cost ? pct((gain / cost) * 100) : ""}</small></b></span>
-    <span>Today<b class="${cls(day)}">${signed(day, B)}</b></span>${extRow ? `
-    <span>${esc(extRow.q.extLabel)}<b class="${cls(ext)}">${signed(ext, B)}</b></span>` : ""}` : "";
+    <span>Today${ext ? ` <small>(${esc(ext.toLowerCase())})</small>` : ""}<b class="${cls(day)}">${signed(day, B)}</b></span>` : "";
   box.querySelector(".empty").classList.toggle("hidden", rows.length > 0);
   const tb = box.querySelector("tbody");
   tb.innerHTML = "";
   for (const r of rows) {
     const tr = document.createElement("tr");
-    if (r.soldOut) tr.className = "soldout";
     tr.innerHTML = `
       <td><div class="sym">${esc(r.symbol)}</div><div class="name" title="${esc(r.name)}">${r.error ? '<span class="down">Price unavailable</span>' : esc(r.name)}</div>${state.about[r.symbol] ? `<div class="about">${esc(state.about[r.symbol])}</div>` : ""}</td>
       <td class="num">${r.soldOut ? "–" : num(r.shares)}</td>
       <td class="num">${money(r.avg, r.cur)}</td>
-      <td class="num"><b>${money(r.price, r.cur)}</b><div class="small ${cls(r.dayPct)}">${pct(r.dayPct)}</div>${r.extPct != null ? `<div class="small ext" title="${esc(r.q.extLabel)} price">${r.q.extLabel === "Pre-market" ? "Pre" : "After"} ${money(r.q.ext, r.cur)} <span class="${cls(r.extPct)}">${pct(r.extPct)}</span></div>` : ""}</td>
+      <td class="num"><b>${money(r.price, r.cur)}</b><div class="small ${cls(r.dayPct)}">${pct(r.dayPct)}</div></td>
       <td class="num">${r.soldOut ? '<span class="muted">Sold</span>' : `<b>${money(r.valueBase, B)}</b>`}</td>
       <td class="num"><span class="pill ${cls(r.retPct)}">${pct(r.retPct)}</span><div class="small ${cls(r.gainBase)}">${signed(r.gainBase, B)}</div></td>`;
     tr.onclick = () => openStock(o, r.symbol);
