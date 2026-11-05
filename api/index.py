@@ -548,8 +548,18 @@ def _safe(fn, *a):
 LIVE_ID = re.compile(r"[A-Za-z0-9_-]{16,40}")
 
 
-def _blob_token():
-    return os.environ.get("BLOB_READ_WRITE_TOKEN")
+_oidc = {"token": None}  # set per request from the x-vercel-oidc-token header
+
+
+def _blob_auth():
+    """(bearer token, store id) for the connected Blob store: newer stores use OIDC + BLOB_STORE_ID, older a read-write token."""
+    store = (os.environ.get("BLOB_STORE_ID") or "").strip()
+    oidc = _oidc["token"] or os.environ.get("VERCEL_OIDC_TOKEN")
+    if store and oidc:
+        return oidc, store[6:] if store.startswith("store_") else store
+    rw = os.environ.get("BLOB_READ_WRITE_TOKEN") or next(
+        (v for k, v in os.environ.items() if k.endswith("READ_WRITE_TOKEN") and v.startswith("vercel_blob_rw_")), None)
+    return (rw, rw.split("_")[3]) if rw else (None, None)
 
 
 def live_load(lid):
@@ -559,8 +569,7 @@ def live_load(lid):
                 return json.load(f)
         except FileNotFoundError:
             return None
-    tok = _blob_token()
-    store = tok.split("_")[3]
+    tok, store = _blob_auth()
     url = "https://%s.private.blob.vercel-storage.com/live/%s.json?cache=0" % (store, lid)
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Bearer " + tok}), timeout=8) as r:
@@ -579,7 +588,7 @@ def live_store(lid, data):
         return
     req = urllib.request.Request(
         "https://vercel.com/api/blob/?pathname=" + urllib.parse.quote("live/%s.json" % lid), data=body, method="PUT",
-        headers={"Authorization": "Bearer " + _blob_token(), "x-api-version": "13", "x-vercel-blob-access": "private",
+        headers={"Authorization": "Bearer " + _blob_auth()[0], "x-vercel-blob-store-id": _blob_auth()[1], "x-api-version": "13", "x-vercel-blob-access": "private",
                  "x-add-random-suffix": "0", "x-allow-overwrite": "1", "x-content-type": "application/json",
                  "x-cache-control-max-age": "60"})
     with urllib.request.urlopen(req, timeout=10) as r:
@@ -587,12 +596,17 @@ def live_store(lid, data):
 
 
 def live_ready():
-    return bool(os.environ.get("LIVE_DIR") or _blob_token())
+    return bool(os.environ.get("LIVE_DIR") or _blob_auth()[0])
+
+
+def _not_ready():
+    names = sorted(k for k in os.environ if "BLOB" in k or "OIDC" in k)
+    return 503, {"error": "Live sharing isn't set up yet", "env": names, "oidcHeader": bool(_oidc["token"])}
 
 
 def live_get(lid):
     if not live_ready():
-        return 503, {"error": "Live sharing isn't set up yet"}
+        return _not_ready()
     if not LIVE_ID.fullmatch(lid or ""):
         return 400, {"error": "bad id"}
     d = live_load(lid)
@@ -603,7 +617,7 @@ def live_get(lid):
 
 def live_put(raw):
     if not live_ready():
-        return 503, {"error": "Live sharing isn't set up yet"}
+        return _not_ready()
     if len(raw) > 300_000:
         return 413, {"error": "too large"}
     b = json.loads(raw)
@@ -651,9 +665,11 @@ def route(path):
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        _oidc["token"] = self.headers.get("x-vercel-oidc-token")
         handler._send(self, *(route(self.path) or (404, {"error": "not found"})))
 
     def do_POST(self):
+        _oidc["token"] = self.headers.get("x-vercel-oidc-token")
         raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         try:
             res = live_put(raw) if urllib.parse.urlparse(self.path).path == "/api/live" else (404, {"error": "not found"})
