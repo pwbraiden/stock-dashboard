@@ -23,6 +23,9 @@ class Handler(SimpleHTTPRequestHandler):
             return index.handler.do_GET(self)
         return super().do_GET()
 
+    def do_POST(self):
+        return index.handler.do_POST(self)
+
 
 if __name__ == "__main__":
     print("Serving on http://localhost:%d" % PORT)

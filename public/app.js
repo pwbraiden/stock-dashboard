@@ -42,8 +42,9 @@ const SAMPLE = [
   { symbol: "SAP.DE", shares: 12, price: 120, date: "2023-09-01", owner: "gf" },
 ];
 const newId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-const saveLots = () => localStorage.setItem("lots", JSON.stringify(state.lots));
+const saveLots = () => { if (state.view) return; localStorage.setItem("lots", JSON.stringify(state.lots)); pushLive(); };
 function loadLots() {
+  if (state.view) return;
   const raw = localStorage.getItem("lots");
   if (raw == null) {
     state.lots = SAMPLE.map((l) => ({ ...l, id: newId(), sample: true }));
@@ -311,7 +312,7 @@ document.querySelectorAll(".owner").forEach((box) => {
   box.querySelector(".addfor").onclick = () => openDialog(null, "", o);
   box.querySelector(".rename").onclick = () => {
     const n = prompt("Name for this portfolio:", state.names[o]);
-    if (n && n.trim()) { state.names[o] = n.trim(); localStorage.setItem("names", JSON.stringify(state.names)); renderAll(); }
+    if (n && n.trim()) { state.names[o] = n.trim(); localStorage.setItem("names", JSON.stringify(state.names)); pushLive(); renderAll(); }
   };
 });
 $("#exportBtn").onclick = (e) => {
@@ -686,8 +687,53 @@ async function pasteShare(e) {
 }
 $("#pasteShare").onclick = pasteShare;
 $("#pasteShareLink").onclick = pasteShare;
+// ---- Live link: this browser keeps the holdings saved online under a random id; the link shows them read-only ----
+const randId = (n) => b64u(crypto.getRandomValues(new Uint8Array(n)));
+let liveOwner = JSON.parse(localStorage.getItem("liveOwner") || "null"), liveTimer;
+const livePayload = () => ({ ...liveOwner, names: state.names, lots: state.lots.filter((l) => !l.sample).map(({ id, sample, ...l }) => l) });
+const postLive = (p) => api("/api/live", { method: "POST", body: JSON.stringify(p) });
+function pushLive() {
+  if (!liveOwner || state.view) return;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => postLive(livePayload()).catch(() => {}), 800);
+}
+async function liveLink() {
+  if (!liveOwner) {
+    const owner = { id: randId(16), key: randId(24) };
+    await postLive({ ...owner, names: state.names, lots: livePayload().lots });
+    liveOwner = owner; localStorage.setItem("liveOwner", JSON.stringify(owner));
+  } else await postLive(livePayload());
+  return `${location.origin}${location.pathname}#live=${liveOwner.id}`;
+}
+function readLiveHash() {
+  let h = location.hash;
+  try { h = decodeURIComponent(h); } catch {}
+  const m = h.match(/[#&]live=([\w-]{16,40})/);
+  if (!m) return false;
+  history.replaceState(null, "", location.pathname + location.search);
+  if (liveOwner && m[1] === liveOwner.id) return false;
+  localStorage.setItem("liveView", m[1]);
+  return true;
+}
+async function loadLive() {
+  if (!state.view) return;
+  const d = await api("/api/live?id=" + state.view);
+  state.lots = d.lots.map((l) => ({ ...l, id: l.symbol + l.date + l.time + l.shares + l.price + (l.side || "") + l.owner }));
+  state.names = { ...state.names, ...d.names };
+}
+function setViewMode() {
+  state.view = localStorage.getItem("liveView") || null;
+  document.body.classList.toggle("viewing", !!state.view);
+  $("#liveBanner").classList.toggle("hidden", !state.view);
+  if (state.view) $("#sampleBanner").classList.add("hidden");
+}
+$("#stopLive").onclick = () => { localStorage.removeItem("liveView"); location.reload(); };
+window.addEventListener("hashchange", async () => { if (readLiveHash()) { setViewMode(); await loadLive().catch(() => {}); renderAll(); refresh(); } });
+
 $("#shareBtn").onclick = async () => {
-  const url = await shareLink(), btn = $("#shareBtn");
+  const btn = $("#shareBtn");
+  let url;
+  try { url = await liveLink(); } catch { url = await shareLink(); }
   if (navigator.share && matchMedia("(pointer: coarse)").matches) { try { await navigator.share({ title: "Our Portfolio", url }); } catch {} return; }
   try { await navigator.clipboard.writeText(url); btn.textContent = "Link copied ✓"; }
   catch { prompt("Copy this link:", url); }
@@ -737,10 +783,12 @@ $("#sgBucket").onchange = loadSuggest;
 
 (async () => {
   chartDefaults();
+  readLiveHash(); setViewMode();
   loadLots();
-  await readShared();
+  if (state.view) { try { await loadLive(); } catch (e) { alert("Couldn't load the live portfolio: " + e.message); } }
+  else await readShared();
   renderAll();
   loadSuggest();
   await refresh();
-  setInterval(() => refresh(), 30000);
+  setInterval(async () => { if (state.view) await loadLive().catch(() => {}); refresh(); }, 30000);
 })();

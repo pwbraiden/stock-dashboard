@@ -1,5 +1,7 @@
 """Yahoo Finance proxy API (Vercel serverless function; also used by server.py locally)."""
+import hashlib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -542,6 +544,80 @@ def _safe(fn, *a):
         return None
 
 
+# ---- Live share: owner's browser saves holdings under a random id; anyone with the id can read them ----
+LIVE_ID = re.compile(r"[A-Za-z0-9_-]{16,40}")
+
+
+def _blob_token():
+    return os.environ.get("BLOB_READ_WRITE_TOKEN")
+
+
+def live_load(lid):
+    if os.environ.get("LIVE_DIR"):  # local development
+        try:
+            with open(os.path.join(os.environ["LIVE_DIR"], lid + ".json")) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+    tok = _blob_token()
+    store = tok.split("_")[3]
+    url = "https://%s.private.blob.vercel-storage.com/live/%s.json?cache=0" % (store, lid)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Bearer " + tok}), timeout=8) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def live_store(lid, data):
+    body = json.dumps(data).encode()
+    if os.environ.get("LIVE_DIR"):
+        with open(os.path.join(os.environ["LIVE_DIR"], lid + ".json"), "wb") as f:
+            f.write(body)
+        return
+    req = urllib.request.Request(
+        "https://vercel.com/api/blob/?pathname=" + urllib.parse.quote("live/%s.json" % lid), data=body, method="PUT",
+        headers={"Authorization": "Bearer " + _blob_token(), "x-api-version": "13", "x-vercel-blob-access": "private",
+                 "x-add-random-suffix": "0", "x-allow-overwrite": "1", "x-content-type": "application/json",
+                 "x-cache-control-max-age": "60"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        r.read()
+
+
+def live_ready():
+    return bool(os.environ.get("LIVE_DIR") or _blob_token())
+
+
+def live_get(lid):
+    if not live_ready():
+        return 503, {"error": "Live sharing isn't set up yet"}
+    if not LIVE_ID.fullmatch(lid or ""):
+        return 400, {"error": "bad id"}
+    d = live_load(lid)
+    if not d:
+        return 404, {"error": "This live link doesn't exist (any more)"}
+    return 200, {"lots": d.get("lots", []), "names": d.get("names", {}), "updated": d.get("updated")}
+
+
+def live_put(raw):
+    if not live_ready():
+        return 503, {"error": "Live sharing isn't set up yet"}
+    if len(raw) > 300_000:
+        return 413, {"error": "too large"}
+    b = json.loads(raw)
+    lid, key = b.get("id", ""), b.get("key", "")
+    if not LIVE_ID.fullmatch(lid) or len(key) < 20 or not isinstance(b.get("lots"), list):
+        return 400, {"error": "bad request"}
+    kh = hashlib.sha256(key.encode()).hexdigest()
+    old = live_load(lid)
+    if old and old.get("keyHash") != kh:
+        return 403, {"error": "not allowed"}
+    live_store(lid, {"keyHash": kh, "lots": b["lots"], "names": b.get("names") or {}, "updated": int(time.time())})
+    return 200, {"ok": True}
+
+
 def route(path):
     """Return (status, payload) for an /api/... GET path, or None if not an API route."""
     u = urllib.parse.urlparse(path)
@@ -566,6 +642,8 @@ def route(path):
             return (200, suggest(b)) if b in BUCKETS else (400, {"error": "unknown bucket"})
         if u.path == "/api/search":
             return 200, search(qs.get("q", [""])[0])
+        if u.path == "/api/live":
+            return live_get(qs.get("id", [""])[0])
     except Exception as e:  # noqa: BLE001
         return 502, {"error": str(e)}
     return None
@@ -573,7 +651,18 @@ def route(path):
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        status, payload = route(self.path) or (404, {"error": "not found"})
+        handler._send(self, *(route(self.path) or (404, {"error": "not found"})))
+
+    def do_POST(self):
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        try:
+            res = live_put(raw) if urllib.parse.urlparse(self.path).path == "/api/live" else (404, {"error": "not found"})
+        except Exception as e:  # noqa: BLE001
+            res = 502, {"error": str(e)}
+        handler._send(self, *res)
+
+    @staticmethod
+    def _send(self, status, payload):
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")

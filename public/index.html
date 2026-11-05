@@ -13,12 +13,16 @@
   <div class="header-actions">
     <span id="updated" class="muted"></span>
     <button id="refresh" class="ghost" title="Refresh prices">&#x21bb; Refresh</button>
-    <button id="shareBtn" class="ghost" title="Copy a link that loads these holdings">Share</button>
+    <button id="shareBtn" class="ghost" title="Copy a live link to these holdings">Share</button>
     <button id="addBtn">+ Add buy / sell</button>
   </div>
 </header>
 
 <main>
+  <div id="liveBanner" class="banner hidden">
+    <span>You're viewing a <b>live portfolio</b>. It updates by itself.</span>
+    <button id="stopLive" class="ghost">Stop viewing</button>
+  </div>
   <div id="sampleBanner" class="banner hidden">
     <span>You're looking at <b>sample stocks</b>. Add your own with <b>+ Add buy / sell</b>, then</span>
     <button id="clearSample" class="ghost">Remove sample stocks</button>
