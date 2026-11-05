@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const START = "2026-10-05";
 const OWNERS = ["me", "gf"];
-const COLORS = { me: "#4f8cff", gf: "#ec4899", bench: "#f59e0b", eu: "#a78bfa" };
+const COLORS = { me: "#2563eb", gf: "#db2777", bench: "#f59e0b", eu: "#8b5cf6" };
 const BENCH = "QQQ", GLOBAL = "VT";
 const state = {
   lots: [], quotes: {}, fx: {}, rows: {}, about: {},
@@ -149,8 +149,9 @@ function renderOwner(o) {
 }
 
 const chartDefaults = () => {
-  Chart.defaults.color = "#8b96ad";
-  Chart.defaults.borderColor = "#2a3550";
+  Chart.defaults.color = "#64748b";
+  Chart.defaults.borderColor = "#eef1f6";
+  if (window.ChartZoom) Chart.register(window.ChartZoom);
   Chart.defaults.font.family = "Inter, system-ui, sans-serif";
 };
 
@@ -427,18 +428,26 @@ function drawCompare() {
     if (wi.benchRet != null) proj("bench", wi.benchLabel || `${BENCH} target`, COLORS.bench, wi.benchRet);
     for (const o of ["me", "gf"]) if (wi.ret[o] != null && !state.hidden[o]) proj(o, `${state.names[o]} implied`, COLORS[o], wi.ret[o]);
   }
-  charts.cmp?.destroy();
+  // Keep the zoomed/panned window across the 30 s redraws.
+  const prev = charts.cmp, keep = prev?.isZoomedOrPanned?.() ? { min: prev.scales.x.min, max: prev.scales.x.max } : null;
+  prev?.destroy();
+  const zoomed = () => $("#zoomReset").classList.toggle("hidden", !charts.cmp?.isZoomedOrPanned?.());
   charts.cmp = new Chart($("#cmpChart"), {
     type: "line",
     data: { labels, datasets },
     options: {
       maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
       plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line", filter: (item) => item.datasetIndex < series.length },
-        onClick: (_, item) => { if (item.datasetIndex >= series.length) return; const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines2", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } } },
+        onClick: (_, item) => { if (item.datasetIndex >= series.length) return; const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines2", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } },
+        zoom: { limits: { x: { min: "original", max: "original", minRange: 10 } },
+          pan: { enabled: true, mode: "x", onPanComplete: zoomed },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x", onZoomComplete: zoomed } } },
       scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0, callback(v) { return this.getLabelForValue(v).split(", ").slice(0, 2).join(", "); } }, grid: { display: false } },
-                y: { ticks: { callback: (v) => v + "%" } } },
+                y: { ticks: { callback: (v) => v + "%" }, border: { display: false } } },
     },
   });
+  if (keep) charts.cmp.zoomScale("x", keep, "none");
+  zoomed();
 }
 
 // ---- What-if: QQQ target -> implied move for girlfriend's portfolio via beta ----
@@ -727,6 +736,7 @@ function setViewMode() {
   $("#liveBanner").classList.toggle("hidden", !state.view);
   if (state.view) $("#sampleBanner").classList.add("hidden");
 }
+$("#zoomReset").onclick = () => { charts.cmp?.resetZoom(); $("#zoomReset").classList.add("hidden"); };
 $("#stopLive").onclick = () => { localStorage.removeItem("liveView"); location.reload(); };
 window.addEventListener("hashchange", async () => { if (readLiveHash()) { setViewMode(); await loadLive().catch(() => {}); renderAll(); refresh(); } });
 

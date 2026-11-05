@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Our Stock Portfolio</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,41 +31,13 @@
     <button id="clearSample" class="ghost">Remove sample stocks</button>
     <button id="pasteShare" class="ghost">Paste a share link</button>
   </div>
-  <div class="layout">
-    <section class="panel" id="compare">
-      <div class="panel-head"><h2>Return since <span id="startLbl"></span></h2></div>
+  <section class="panel hero" id="compare">
+      <div class="panel-head"><h2>Return since <span id="startLbl"></span></h2><button id="zoomReset" class="ghost small-btn hidden" type="button">Reset zoom</button></div>
       <div id="cmpSummary" class="cmp-summary"></div>
       <div class="chart-box chart-main"><canvas id="cmpChart"></canvas></div>
       <p class="muted small" id="cmpNote"></p>
-      <div class="whatif">
-        <h2 class="wi-title">Sensitivity: what if?</h2>
-        <h3>QQQ target</h3>
-        <div class="wi-row">
-          <label>Based on<select id="wiQqq">
-            <option value="price">My QQQ price</option>
-            <option value="banks">Bank average (year-end S&amp;P 500)</option>
-          </select></label>
-          <label data-for="price">QQQ price <span class="muted" id="wiNow"></span><input id="wiPrice" type="number" step="any" min="0" placeholder="e.g. 720"></label>
-          <label>By date<input id="wiDate" type="date"></label>
-          <label>Time<input id="wiTime" type="time"></label>
-          <button class="ghost" id="wiClear" type="button">Clear</button>
-        </div>
-        <div class="wi-head wi-sub"><h3>Stocks: method</h3>
-          <div class="seg" id="wiMode"><button type="button" data-mode="beta">Beta to QQQ target</button><button type="button" data-mode="recovery">Drawdown recovery</button><button type="button" data-mode="targets">Price targets</button></div>
-        </div>
-        <div class="wi-row" data-for="recovery">
-          <label>Take back % of drop<input id="wiRec" type="number" step="any" min="0" max="100" placeholder="30"></label>
-          <label>From high since<input id="wiPeak" type="date"></label>
-        </div>
-        <div id="wiOut" class="wi-out"></div>
-        <div class="table-wrap"><table id="wiTable" class="holdings hidden">
-          <thead></thead>
-          <tbody></tbody>
-        </table></div>
-        <p class="muted small" id="wiNote"></p>
-      </div>
-    </section>
-    <div class="side">
+  </section>
+  <div class="grid2 owners">
     <section class="panel owner" data-owner="me">
       <div class="panel-head">
         <h2><span class="dot"></span><span class="oname"></span> <button class="icon rename" title="Rename">&#9998;</button></h2>
@@ -97,8 +72,37 @@
       </div>
       <p class="muted small empty hidden">No stocks yet. Click <b>+ Add</b>.</p>
     </section>
-    </div>
   </div>
+
+  <section class="panel" id="whatifPanel">
+    <div class="whatif">
+      <h2 class="wi-title">Sensitivity: what if?</h2>
+      <h3>QQQ target</h3>
+      <div class="wi-row">
+        <label>Based on<select id="wiQqq">
+          <option value="price">My QQQ price</option>
+          <option value="banks">Bank average (year-end S&amp;P 500)</option>
+        </select></label>
+        <label data-for="price">QQQ price <span class="muted" id="wiNow"></span><input id="wiPrice" type="number" step="any" min="0" placeholder="e.g. 720"></label>
+        <label>By date<input id="wiDate" type="date"></label>
+        <label>Time<input id="wiTime" type="time"></label>
+        <button class="ghost" id="wiClear" type="button">Clear</button>
+      </div>
+      <div class="wi-head wi-sub"><h3>Stocks: method</h3>
+        <div class="seg" id="wiMode"><button type="button" data-mode="beta">Beta to QQQ target</button><button type="button" data-mode="recovery">Drawdown recovery</button><button type="button" data-mode="targets">Price targets</button></div>
+      </div>
+      <div class="wi-row" data-for="recovery">
+        <label>Take back % of drop<input id="wiRec" type="number" step="any" min="0" max="100" placeholder="30"></label>
+        <label>From high since<input id="wiPeak" type="date"></label>
+      </div>
+      <div id="wiOut" class="wi-out"></div>
+      <div class="table-wrap"><table id="wiTable" class="holdings hidden">
+        <thead></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="muted small" id="wiNote"></p>
+    </div>
+  </section>
 
   <section class="panel" id="suggest">
     <div class="panel-head">
@@ -116,7 +120,7 @@
   </section>
 
   <footer class="muted small">
-    Prices from Yahoo Finance, refreshed every 30 s (may be delayed). Totals in other currencies use today's exchange rate. Your holdings are saved only in this browser.
+    Prices from Nasdaq and Yahoo Finance, refreshed every 30 s.
     <a href="#" id="exportBtn">Export</a> · <a href="#" id="importBtn">Import</a> · <a href="#" id="pasteShareLink">Paste share link</a>
     <input type="file" id="importFile" accept="application/json" class="hidden">
   </footer>
