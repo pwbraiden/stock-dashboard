@@ -81,3 +81,7 @@ dialog select{width:100%;margin-top:4px}
 .tag.sell{display:inline-block;font-size:11px;padding:1px 6px;border-radius:6px;background:rgba(220,38,38,.1);color:var(--down);margin-right:4px}
 .viewing #addBtn,.viewing #shareBtn,.viewing .addfor,.viewing .rename,.viewing [data-edit],.viewing [data-del],.viewing [data-addfor],.viewing [data-sellfor],.viewing #importBtn,.viewing #pasteShareLink{display:none!important}
 .name{color:#334155}.about{color:#475569}td{border-bottom-color:#e3e8ef}.sym{color:var(--text)}
+.cmp-item{all:unset;cursor:pointer;display:block;padding:4px 10px 6px;margin:-4px -10px -6px;border-radius:10px;transition:background .15s,opacity .15s;-webkit-tap-highlight-color:transparent}
+.cmp-item:hover{background:var(--panel2)}.cmp-item:focus-visible{outline:2px solid var(--accent)}
+.cmp-item.off{opacity:.4}.cmp-item.off b{color:var(--muted);text-decoration:line-through;text-decoration-thickness:2px}
+.cmp-hint{font-size:12px;font-weight:500;color:var(--muted);margin:-8px 0 10px}

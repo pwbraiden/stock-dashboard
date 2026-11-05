@@ -402,9 +402,8 @@ function drawCompare() {
     { key: "bench", label: BENCH, color: COLORS.bench },
     { key: "eu", label: "Eunan", color: COLORS.eu },
   ].filter((s) => d[s.key].some((x) => x != null));
-  const shown = series.filter((s) => !state.hidden[s.key]);
-  $("#cmpSummary").innerHTML = shown.map((s) => { const r = last(d[s.key]);
-    return `<span><span class="dot" style="background:${s.color}"></span>${esc(s.label)}<b class="${cls(r)}">${pct(r)}</b></span>`; }).join("");
+  $("#cmpSummary").innerHTML = series.map((s) => { const r = last(d[s.key]), off = !!state.hidden[s.key];
+    return `<button type="button" class="cmp-item${off ? " off" : ""}" data-line="${s.key}" aria-pressed="${!off}" title="${off ? "Show" : "Hide"} line"><span class="dot" style="background:${s.color}"></span>${esc(s.label)}<b class="${cls(r)}">${pct(r)}</b></button>`; }).join("");
   $("#cmpNote").textContent = `Return on the money put in, in each stock's own currency. ${BENCH} measured from its first price after the start. Buying more doesn't count as a gain.`;
   const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
   const fmt = (t) => new Date(t * 1000).toLocaleString(undefined, span < 20 ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
@@ -425,7 +424,7 @@ function drawCompare() {
       datasets.push({ label, data, borderColor: color, backgroundColor: color, borderDash: [6, 4], borderWidth: 2, spanGaps: true, tension: 0,
         pointRadius: data.map((_, j) => (j === n ? 5 : 0)), proj: true });
     };
-    if (wi.benchRet != null) proj("bench", wi.benchLabel || `${BENCH} target`, COLORS.bench, wi.benchRet);
+    if (wi.benchRet != null && !state.hidden.bench) proj("bench", wi.benchLabel || `${BENCH} target`, COLORS.bench, wi.benchRet);
     for (const o of ["me", "gf"]) if (wi.ret[o] != null && !state.hidden[o]) proj(o, `${state.names[o]} implied`, COLORS[o], wi.ret[o]);
   }
   // Keep the zoomed/panned window across the 30 s redraws.
@@ -437,8 +436,7 @@ function drawCompare() {
     data: { labels, datasets },
     options: {
       maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { usePointStyle: true, pointStyle: "line", filter: (item) => item.datasetIndex < series.length },
-        onClick: (_, item) => { if (item.datasetIndex >= series.length) return; const k = series[item.datasetIndex].key; state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines2", JSON.stringify(state.hidden)); drawCompare(); } }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } },
+      plugins: { legend: { display: false }, tooltip: { filter: (c) => c.raw != null, callbacks: { label: (c) => ` ${c.dataset.label}: ${pct(c.raw)}` } },
         zoom: { limits: { x: { min: "original", max: "original", minRange: 10 } },
           pan: { enabled: true, mode: "x", onPanComplete: zoomed },
           zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x", onZoomComplete: zoomed } } },
@@ -736,6 +734,10 @@ function setViewMode() {
   $("#liveBanner").classList.toggle("hidden", !state.view);
   if (state.view) $("#sampleBanner").classList.add("hidden");
 }
+$("#cmpSummary").onclick = (e) => {
+  const k = e.target.closest("[data-line]")?.dataset.line; if (!k) return;
+  state.hidden[k] = !state.hidden[k]; localStorage.setItem("hiddenLines2", JSON.stringify(state.hidden)); drawCompare();
+};
 $("#zoomReset").onclick = () => { charts.cmp?.resetZoom(); $("#zoomReset").classList.add("hidden"); };
 $("#stopLive").onclick = () => { localStorage.removeItem("liveView"); location.reload(); };
 window.addEventListener("hashchange", async () => { if (readLiveHash()) { setViewMode(); await loadLive().catch(() => {}); renderAll(); refresh(); } });
