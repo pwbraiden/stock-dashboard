@@ -149,8 +149,8 @@ function renderOwner(o) {
 }
 
 const chartDefaults = () => {
-  Chart.defaults.color = "#64748b";
-  Chart.defaults.borderColor = "#eef1f6";
+  Chart.defaults.color = "#334155";
+  Chart.defaults.borderColor = "#e2e8f0";
   if (window.ChartZoom) Chart.register(window.ChartZoom);
   Chart.defaults.font.family = "Inter, system-ui, sans-serif";
 };
