@@ -1,6 +1,6 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const START = "2026-10-05";
+const START = "2026-10-01";
 const OWNERS = ["me", "gf"];
 const COLORS = { me: "#2563eb", gf: "#db2777", bench: "#f59e0b", eu: "#8b5cf6" };
 const BENCH = "QQQ", GLOBAL = "VT";
@@ -386,7 +386,7 @@ async function renderCompare() {
   const eu = ffill(gp, keys).map((p) => (p != null && g0 ? (p / g0 - 1) * 100 : null));
   const sd = new Date(start.when);
   $("#startLbl").textContent = sd.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) +
-    (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : " (market top)");
+    (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
   await Promise.all([loadBetas(allSyms()), loadWi()]);
   if (seq !== cmp.seq) return;
   cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)), eu };
