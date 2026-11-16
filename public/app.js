@@ -381,6 +381,8 @@ async function renderCompare() {
       return c > 0 ? (v / c - 1) * 100 : null;
     });
   };
+  // Each portfolio line is shifted so its first point is exactly 0.
+  const off = {}, fromZero = (o) => { const r = line(o), r0 = r.find((x) => x != null) ?? 0; off[o] = r0; return { [o]: r.map((x) => (x == null ? null : x - r0)) }; };
   const b0 = bpx.find((p) => p != null);
   const gp = glob?.points || [], g0 = gp.find((p) => localWhen(p[0]) >= start.when)?.[1];
   const eu = ffill(gp, keys).map((p) => (p != null && g0 ? (p / g0 - 1) * 100 : null));
@@ -389,7 +391,7 @@ async function renderCompare() {
     (start.lot?.time ? ", " + start.lot.time : "") + (start.lot ? ` (first ${start.lot.symbol} order)` : "");
   await Promise.all([loadBetas(allSyms()), loadWi()]);
   if (seq !== cmp.seq) return;
-  cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), me: line("me"), gf: line("gf"), bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)), eu };
+  cmp.data = { keys, b0, bLast: [...bpx].reverse().find((p) => p != null), ...fromZero("me"), ...fromZero("gf"), off, bench: bpx.map((p) => (p != null && b0 ? (p / b0 - 1) * 100 : null)), eu };
   drawCompare();
 }
 
@@ -404,7 +406,7 @@ function drawCompare() {
   ].filter((s) => d[s.key].some((x) => x != null));
   $("#cmpSummary").innerHTML = series.map((s) => { const r = last(d[s.key]), off = !!state.hidden[s.key];
     return `<button type="button" class="cmp-item${off ? " off" : ""}" data-line="${s.key}" aria-pressed="${!off}" title="${off ? "Show" : "Hide"} line"><span class="dot" style="background:${s.color}"></span>${esc(s.label)}<b class="${cls(r)}">${pct(r)}</b></button>`; }).join("");
-  $("#cmpNote").textContent = `Return on the money put in, in each stock's own currency. ${BENCH} measured from its first price after the start. Buying more doesn't count as a gain.`;
+  $("#cmpNote").textContent = `Return on the money put in, in each stock's own currency. ${BENCH} measured from its first price after the start. Buying more doesn't count as a gain. Each portfolio line starts at 0.`;
   const span = d.keys.length ? (d.keys[d.keys.length - 1] - d.keys[0]) / 86400 : 0;
   const fmt = (t) => new Date(t * 1000).toLocaleString(undefined, span < 20 ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
   const labels = d.keys.map(fmt);
@@ -425,7 +427,7 @@ function drawCompare() {
         pointRadius: data.map((_, j) => (j === n ? 5 : 0)), proj: true });
     };
     if (wi.benchRet != null && !state.hidden.bench) proj("bench", wi.benchLabel || `${BENCH} target`, COLORS.bench, wi.benchRet);
-    for (const o of ["me", "gf"]) if (wi.ret[o] != null && !state.hidden[o]) proj(o, `${state.names[o]} implied`, COLORS[o], wi.ret[o]);
+    for (const o of ["me", "gf"]) if (wi.ret[o] != null && !state.hidden[o]) proj(o, `${state.names[o]} implied`, COLORS[o], wi.ret[o] - (d.off?.[o] || 0));
   }
   // Keep the zoomed/panned window across the 30 s redraws.
   const prev = charts.cmp, keep = prev?.isZoomedOrPanned?.() ? { min: prev.scales.x.min, max: prev.scales.x.max } : null;
